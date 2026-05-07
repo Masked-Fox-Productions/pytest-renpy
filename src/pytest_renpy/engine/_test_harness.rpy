@@ -287,6 +287,9 @@ init 999 python:
     if _os.environ.get("RENPY_TEST_SOCKET"):
         renpy.store.menu = _patched_display_menu
 
+        if "start" not in renpy.game.script.namemap:
+            renpy.config.label_overrides["start"] = "_harness_idle"
+
         # Patch do_with to skip transitions (they require a display)
         if renpy.game.interface is not None:
             renpy.game.interface.do_with = lambda *args, **kwargs: False
