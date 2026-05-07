@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pytest-renpy"
 version = "0.1.0"
-description = "Pytest plugin for testing Ren'Py game logic without the engine"
+description = "Pytest plugin for testing Ren'Py game logic — mock-based unit tests and headless engine integration tests"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
