@@ -10,14 +10,37 @@ import platform
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pytest_renpy.engine.ipc import IPCServer
 
 
 class EngineError(Exception):
     """Raised when the Ren'Py engine fails to start, crashes, or returns an error."""
+
+
+@dataclass
+class NavigationResult:
+    at_label: str | None
+    yield_type: str
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AdvanceResult:
+    status: str
+    ticks_elapsed: int
+    at_label: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MenuResult:
+    choice: str
+    index: int
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class RenpyEngine:
@@ -39,6 +62,8 @@ class RenpyEngine:
         self._tmp_project: Path | None = None
         self._save_dir: str | None = None
         self._socket_path: str | None = None
+        self._pending_menu: dict[str, Any] | None = None
+        self._last_menu_options: list[dict[str, str]] = []
 
     @property
     def is_alive(self) -> bool:
@@ -123,10 +148,147 @@ class RenpyEngine:
     def recv(self) -> dict[str, Any]:
         self._check_alive()
         try:
-            return self._ipc.receive_command()
+            resp = self._ipc.receive_command()
         except ConnectionError:
             stderr = self._capture_stderr()
             raise EngineError(f"Engine died.\n{stderr}")
+        if resp.get("status") == "menu_waiting":
+            self._pending_menu = resp
+            self._last_menu_options = resp.get("options", [])
+        else:
+            self._pending_menu = None
+        return resp
+
+    # --- Navigation Commands (Unit 4) ---
+
+    def jump(self, label: str) -> NavigationResult:
+        self.send({"cmd": "jump", "label": label})
+        resp = self._recv_navigation()
+        return NavigationResult(
+            at_label=resp.get("at_label"),
+            yield_type=resp.get("yield_type", ""),
+            raw=resp,
+        )
+
+    def call(self, label: str) -> NavigationResult:
+        self.send({"cmd": "call", "label": label})
+        resp = self._recv_navigation()
+        return NavigationResult(
+            at_label=resp.get("at_label"),
+            yield_type=resp.get("yield_type", ""),
+            raw=resp,
+        )
+
+    def advance(self, ticks: int = 1) -> AdvanceResult:
+        total = 0
+        last_resp = None
+        for _ in range(ticks):
+            self.send({"cmd": "continue"})
+            resp = self.recv()
+            last_resp = resp
+            total += 1
+            if resp.get("status") == "menu_waiting":
+                break
+        return AdvanceResult(
+            status=last_resp.get("status", ""),
+            ticks_elapsed=total,
+            at_label=last_resp.get("at_label") if last_resp else None,
+            raw=last_resp or {},
+        )
+
+    def advance_until(
+        self,
+        label: str | None = None,
+        condition: Callable[[dict[str, Any]], bool] | None = None,
+        max_ticks: int = 1000,
+    ) -> AdvanceResult:
+        for tick in range(1, max_ticks + 1):
+            self.send({"cmd": "continue"})
+            resp = self.recv()
+
+            if resp.get("status") == "menu_waiting":
+                if label is None and condition is None:
+                    return AdvanceResult(
+                        status="menu_waiting",
+                        ticks_elapsed=tick,
+                        at_label=resp.get("at_label"),
+                        raw=resp,
+                    )
+
+            at = resp.get("at_label")
+            if label is not None and at == label:
+                return AdvanceResult(
+                    status="reached",
+                    ticks_elapsed=tick,
+                    at_label=at,
+                    raw=resp,
+                )
+
+            if condition is not None:
+                store = self.get_store()
+                if condition(store):
+                    return AdvanceResult(
+                        status="reached",
+                        ticks_elapsed=tick,
+                        at_label=at,
+                        raw=resp,
+                    )
+
+        return AdvanceResult(
+            status="timeout",
+            ticks_elapsed=max_ticks,
+            at_label=resp.get("at_label") if resp else None,
+            raw=resp or {},
+        )
+
+    def _recv_navigation(self) -> dict[str, Any]:
+        resp = self.recv()
+        if resp.get("status") == "error":
+            raise EngineError(resp.get("message", "Engine error"))
+        return resp
+
+    # --- State Inspection Commands (Unit 5) ---
+
+    def get_store(self, *var_names: str) -> dict[str, Any]:
+        if not var_names:
+            resp = self.send_command({"cmd": "get_store", "vars": []})
+            return resp.get("values", {})
+        resp = self.send_command({"cmd": "get_store", "vars": list(var_names)})
+        return resp.get("values", {})
+
+    def get_terminal_log(self) -> list[str] | None:
+        store = self.get_store("terminal_log")
+        return store.get("terminal_log")
+
+    def get_available_commands(self) -> dict[str, Any] | None:
+        store = self.get_store("cmd_dict")
+        return store.get("cmd_dict")
+
+    # --- Menu Interaction and Store Mutation (Unit 6) ---
+
+    def get_menu_options(self) -> list[dict[str, str]]:
+        return self._pending_menu.get("options", []) if self._pending_menu else []
+
+    def select_menu(self, choice: int | str = 0) -> MenuResult:
+        if isinstance(choice, str):
+            options = self.get_menu_options()
+            for i, opt in enumerate(options):
+                if opt.get("text") == choice:
+                    choice = i
+                    break
+            else:
+                raise EngineError(f"Menu option not found: {choice!r}")
+
+        self.send({"cmd": "menu_select", "index": choice})
+        resp = self.recv()
+        self._pending_menu = None
+        text = ""
+        if self._last_menu_options and 0 <= choice < len(self._last_menu_options):
+            text = self._last_menu_options[choice].get("text", "")
+        return MenuResult(choice=text, index=choice, raw=resp)
+
+    def set_store(self, **kwargs: Any) -> None:
+        self.send_command({"cmd": "set_store", "vars": kwargs})
 
     def stop(self) -> None:
         if self._process and self._process.poll() is None:
