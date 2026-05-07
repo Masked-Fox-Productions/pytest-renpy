@@ -92,6 +92,80 @@ from pytest_renpy import JumpException, CallException, ReturnException, QuitExce
 
 Unimplemented `renpy.*` attributes return no-op stubs instead of raising errors.
 
+## Integration Testing (Layer 2)
+
+Layer 2 boots a real headless Ren'Py process and communicates over IPC, enabling tests that exercise label flow, store mutations, menu interaction, and label-scoped functions — things Layer 1's mock can't reach.
+
+### Prerequisites
+
+Download the [Ren'Py SDK](https://www.renpy.org/latest.html) (8.x).
+
+### Configuration
+
+```sh
+pytest --renpy-project=/path/to/my-game --renpy-sdk=/path/to/renpy-sdk
+```
+
+Tests that use Layer 2 fixtures will be skipped if `--renpy-sdk` is not set. Layer 1 tests are unaffected.
+
+### Fixtures
+
+| Fixture | Scope | Description |
+|---------|-------|-------------|
+| `renpy_session` | function | Fresh headless Ren'Py engine per test (primary fixture) |
+| `renpy_engine` | function | Alias for `renpy_session` |
+
+### API
+
+```python
+def test_label_flow(renpy_session):
+    # Jump to a label — engine executes it, yields at the next say/pause/menu
+    result = renpy_session.jump("start")
+
+    # Read store variables
+    store = renpy_session.get_store("score", "player_name")
+    assert store["score"] == 0
+
+    # Set store variables (for game-specific input adapters)
+    renpy_session.set_store(player_name="Alice")
+
+    # Advance past a say/pause
+    renpy_session.advance(1)
+
+    # Advance until a condition is met
+    result = renpy_session.advance_until(
+        condition=lambda s: s.get("score", 0) > 10,
+        max_ticks=100,
+    )
+    assert result.status == "reached"
+
+def test_menu_interaction(renpy_session):
+    result = renpy_session.jump("choose_option")
+
+    # If the label hits a menu, result.raw["status"] == "menu_waiting"
+    options = renpy_session.get_menu_options()
+    # [{"text": "Apple"}, {"text": "Banana"}]
+
+    menu_result = renpy_session.select_menu(1)        # by index
+    menu_result = renpy_session.select_menu("Apple")  # or by text
+```
+
+### How it works
+
+The engine runner:
+1. Copies your game directory to a temp location
+2. Injects a `_test_harness.rpy` that patches `renpy.ui.interact` and `renpy.display_menu`
+3. Launches the SDK's Python with SDL dummy drivers (no display)
+4. Communicates over a Unix domain socket using JSON lines
+
+Each test gets a fresh engine process for perfect isolation. The original project directory is never modified.
+
+### Troubleshooting
+
+- **"SDK Python not found"**: Check that `--renpy-sdk` points to the SDK root (containing `renpy.py` and `lib/`)
+- **Engine boot timeout**: Some games have parse errors that prevent headless boot. Check the error output for details
+- **"Invalid window" errors**: The harness patches transitions to no-ops, but some games may trigger display init in unexpected places
+
 ## Development
 
 ```sh
