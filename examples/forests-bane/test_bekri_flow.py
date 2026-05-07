@@ -146,7 +146,7 @@ class TestSmallBekriMovement:
             init_game(engine)
             setup_bekri(engine, "small", 3, 3, phase=start_phase, target="player")
             # High haste to dodge dive damage so player doesn't die
-            engine.exec_code('Entities["special"]["player"]["haste"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 999')
             run_monster_movement(engine)
             assert get_bekri(engine, "phase") == expected_phase
 
@@ -172,7 +172,7 @@ class TestSmallBekriMovement:
             init_game(engine)
             setup_bekri(engine, "small", 3, 3, phase="diving", target="player")
             # Low haste so attack lands
-            engine.exec_code('Entities["special"]["player"]["haste"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 0')
             health_before = get_player_health(engine)
             run_monster_movement(engine)
             assert get_player_health(engine) < health_before
@@ -193,7 +193,8 @@ class TestMediumBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="waiting", target="player")
-            engine.exec_code('Entities["special"]["player"]["grip"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["grip"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = -999')
             run_monster_movement(engine)
             assert get_bekri(engine, "phase") == "attacking"
 
@@ -202,7 +203,7 @@ class TestMediumBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="waiting", target="player")
-            engine.exec_code('Entities["special"]["player"]["grip"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["grip"] = 999')
             run_monster_movement(engine)
             assert get_bekri(engine, "phase") == "waiting"
 
@@ -211,7 +212,7 @@ class TestMediumBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="attacking", target="player")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = -999')
             health_before = get_player_health(engine)
             run_monster_movement(engine)
             assert get_player_health(engine) < health_before
@@ -221,8 +222,8 @@ class TestMediumBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="attacking", target="player")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 999')
-            engine.exec_code('Entities["special"]["player"]["haste"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 999')
             run_monster_movement(engine)
             assert get_bekri(engine, "phase") == "waiting"
 
@@ -231,8 +232,8 @@ class TestMediumBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="attacking", target="player")
-            engine.exec_code('Entities["special"]["player"]["grip"] = 0')
-            engine.exec_code('Entities["special"]["player"]["impression"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["grip"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = -999')
             # Seed random so randint(0,3)==3 triggers arm rip
             engine.exec_code("renpy.random.seed(42)")
             run_monster_movement(engine)
@@ -263,7 +264,8 @@ class TestLargeBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "large", 3, 3, target="player")
-            engine.exec_code('Entities["special"]["player"]["haste"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = -999')
             health_before = get_player_health(engine)
             run_monster_movement(engine)
             assert get_player_health(engine) < health_before
@@ -273,7 +275,7 @@ class TestLargeBekriMovement:
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "large", 3, 3, target="player")
-            engine.exec_code('Entities["special"]["player"]["haste"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 0')
             # We can't guarantee a 31-32 roll, but we can test the path
             # doesn't crash with any roll
             run_monster_movement(engine)
@@ -297,7 +299,7 @@ class TestSmallBekriCombat:
             init_game(engine)
             setup_bekri(engine, "small", 3, 3, phase="staggered", target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_bekri(engine, "health") < health_before
@@ -309,7 +311,7 @@ class TestSmallBekriCombat:
                 init_game(engine)
                 setup_bekri(engine, "small", 3, 3, phase=phase, target="player")
                 engine.exec_code("change_inventory('hatchet')")
-                engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+                engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
                 health_before = get_bekri(engine, "health")
                 engine.exec_code('attack_with("hatchet", "bekri")')
                 assert get_bekri(engine, "health") == health_before, (
@@ -323,7 +325,7 @@ class TestSmallBekriCombat:
             setup_bekri(engine, "small", 3, 3, phase="staggered", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 1')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 1')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             assert get_bekri(engine, "health") < health_before
@@ -335,22 +337,26 @@ class TestSmallBekriCombat:
             setup_bekri(engine, "small", 3, 3, phase="waiting", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 0')
-            engine.exec_code('Entities["special"]["player"]["luck"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = -999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 0')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             assert get_bekri(engine, "health") == health_before
 
     def test_ranged_diving_hit_causes_falling(self):
-        """Hitting small Bekri during diving phase sets phase to falling."""
+        """Hitting small Bekri during diving phase knocks it down (falling → staggered).
+
+        The attack sets phase to 'falling', but attack_with runs through
+        end_turn which triggers monster movement, advancing falling → staggered.
+        """
         with make_engine() as engine:
             init_game(engine)
             setup_bekri(engine, "small", 3, 3, phase="diving", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 999')
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
-            assert get_bekri(engine, "phase") == "falling"
+            assert get_bekri(engine, "phase") in ("falling", "staggered")
 
     def test_ranged_hit_adds_partial_health_back(self):
         """Ranged hits on small Bekri add back 30% of weapon damage."""
@@ -359,7 +365,7 @@ class TestSmallBekriCombat:
             setup_bekri(engine, "small", 3, 3, phase="staggered", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             health_after = get_bekri(engine, "health")
@@ -384,7 +390,7 @@ class TestMediumBekriCombat:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="waiting", target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_bekri(engine, "health") == health_before
@@ -396,8 +402,8 @@ class TestMediumBekriCombat:
             setup_bekri(engine, "medium", 3, 3, phase="waiting", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["judgement"] = 999')
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["judgement"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             assert get_bekri(engine, "health") < health_before
@@ -409,8 +415,8 @@ class TestMediumBekriCombat:
             setup_bekri(engine, "medium", 3, 3, phase="waiting", target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["judgement"] = 0')
-            engine.exec_code('Entities["special"]["player"]["luck"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["judgement"] = -999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 0')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             assert get_bekri(engine, "health") == health_before
@@ -421,7 +427,7 @@ class TestMediumBekriCombat:
             init_game(engine)
             setup_bekri(engine, "medium", 3, 3, phase="attacking", target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_bekri(engine, "health") < health_before
@@ -443,7 +449,7 @@ class TestLargeBekriCombat:
             init_game(engine)
             setup_bekri(engine, "large", 3, 3, target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_bekri(engine, "health") < health_before
@@ -454,9 +460,9 @@ class TestLargeBekriCombat:
             init_game(engine)
             setup_bekri(engine, "large", 3, 3, target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
-            engine.exec_code('Entities["special"]["player"]["grip"] = 0')
-            engine.exec_code('Entities["special"]["player"]["luck"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["grip"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 0')
             health_before = get_player_health(engine)
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_player_health(engine) < health_before
@@ -467,8 +473,7 @@ class TestLargeBekriCombat:
             init_game(engine)
             setup_bekri(engine, "large", 3, 3, target="player")
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
-            engine.exec_code('Entities["special"]["player"]["grip"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 999')
             health_before = get_player_health(engine)
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_player_health(engine) == health_before
@@ -480,8 +485,7 @@ class TestLargeBekriCombat:
             setup_bekri(engine, "large", 3, 3, target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
-            engine.exec_code('Entities["special"]["player"]["haste"] = 999')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 999')
             health_before = get_bekri(engine, "health")
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             health_after = get_bekri(engine, "health")
@@ -496,9 +500,9 @@ class TestLargeBekriCombat:
             setup_bekri(engine, "large", 3, 3, target="player")
             engine.exec_code("change_inventory('hunting_rifle')")
             engine.exec_code("add_hunting_rifle_ammo_amount(10)")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
-            engine.exec_code('Entities["special"]["player"]["haste"] = 0')
-            engine.exec_code('Entities["special"]["player"]["luck"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["haste"] = 0')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["luck"] = 0')
             health_before = get_player_health(engine)
             engine.exec_code('attack_with("hunting_rifle", "bekri")')
             assert get_player_health(engine) < health_before
@@ -647,7 +651,7 @@ class TestBekriKill:
             setup_bekri(engine, "small", 3, 3, phase="staggered", target="player")
             engine.exec_code('Entities["monsters"]["bekri"]["health"] = 1')
             engine.exec_code("change_inventory('hatchet')")
-            engine.exec_code('Entities["special"]["player"]["impression"] = 50')
+            engine.exec_code('Entities["special"]["player"]["permanent_attribute_modifier"]["impression"] = 50')
             engine.exec_code('attack_with("hatchet", "bekri")')
             assert get_bekri(engine, "health") <= 0
 
@@ -673,7 +677,7 @@ class TestBekriEatArm:
             # Give player a poisonous item
             engine.exec_code("change_inventory('hemlock_berries')")
             engine.exec_code("bekri_eat_arm()")
-            poisoned = get_bekri(engine, "poisoned")
+            poisoned = engine.eval_expr('Entities["monsters"]["bekri"].get("poisoned", False)')
             # If hemlock_berries has poison_value, bekri should be poisoned
             has_hemlock = engine.eval_expr("'hemlock_berries' in inventory")
             # The item should be consumed
