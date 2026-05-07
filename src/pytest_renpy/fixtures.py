@@ -10,6 +10,7 @@ import pytest
 from pytest_renpy.loader import ProjectData, load_project
 from pytest_renpy.mock_renpy import create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
+from pytest_renpy.engine.runner import RenpyEngine
 
 
 @dataclass
@@ -62,3 +63,37 @@ def renpy_game(renpy_project, renpy_store, renpy_mock) -> RenpyGame:
         mock=renpy_mock,
         labels=renpy_project.labels,
     )
+
+
+# --- Layer 2 fixtures ---
+
+
+@pytest.fixture
+def renpy_engine(request) -> RenpyEngine:
+    """Function-scoped fixture: fresh headless Ren'Py engine per test.
+
+    Requires --renpy-sdk and --renpy-project to be set.
+    Skips if --renpy-sdk is not provided.
+    """
+    sdk_path = request.config.getoption("renpy_sdk")
+    if sdk_path is None:
+        pytest.skip("--renpy-sdk required for integration tests")
+
+    sdk = Path(sdk_path).resolve()
+    if not sdk.is_dir():
+        pytest.exit(f"Ren'Py SDK not found at {sdk}")
+
+    project_path = Path(request.config.getoption("renpy_project")).resolve()
+    engine = RenpyEngine(sdk, project_path, timeout=15)
+    engine.start()
+    yield engine
+    engine.stop()
+
+
+@pytest.fixture
+def renpy_session(renpy_engine) -> RenpyEngine:
+    """Function-scoped fixture: convenience alias for renpy_engine.
+
+    This is the primary fixture test authors should use for Layer 2 tests.
+    """
+    return renpy_engine
