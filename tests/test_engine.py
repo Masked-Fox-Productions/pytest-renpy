@@ -297,3 +297,114 @@ class TestMenuAPI:
             engine.jump("menu_test")
             with pytest.raises(EngineError, match="Menu option not found"):
                 engine.select_menu("Cherry")
+
+
+class TestAutoAdvance:
+    @requires_sdk
+    @requires_fixture
+    def test_call_auto_advances_says(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_with_says")
+            assert result.yield_type == "completed"
+            store = engine.get_store("call_result")
+            assert store["call_result"] == "after"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_nested_auto_advances(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_nested")
+            assert result.yield_type == "completed"
+            store = engine.get_store("call_result", "inner_result")
+            assert store["call_result"] == "outer_done"
+            assert store["inner_result"] == "inner_done"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_with_jump_auto_advances_through(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_with_jump")
+            # Jump doesn't pop the call frame, so auto-advance continues
+            # through jump_target (say auto-advanced) and into call_with_menu
+            # where the menu yields to IPC
+            assert result.raw.get("status") == "menu_waiting"
+            store = engine.get_store("call_result")
+            assert store["call_result"] == "jumped"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_with_menu_pauses(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_with_menu")
+            assert result.raw.get("status") == "menu_waiting"
+            menu_result = engine.select_menu(0)
+            assert menu_result.raw.get("status") == "completed"
+            store = engine.get_store("call_result", "choice_made")
+            assert store["call_result"] == "menu_done"
+            assert store["choice_made"] == "option_a"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_no_yields_completes(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_no_yields")
+            assert result.yield_type == "completed"
+            store = engine.get_store("call_result")
+            assert store["call_result"] == "no_yield_done"
+
+    @requires_sdk
+    @requires_fixture
+    def test_jump_still_yields_at_every_point(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.jump("set_x")
+            assert result.yield_type == "say"
+            assert result.raw.get("status") == "yielded"
+
+    @requires_sdk
+    @requires_fixture
+    def test_exec_code_with_call_completes(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            resp = engine.exec_code("trigger_call()")
+            assert resp is not None
+            assert resp.get("status") == "completed"
+            store = engine.get_store("exec_result")
+            assert store["exec_result"] == "exec_call_done"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_then_jump_no_stale_state(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_no_yields")
+            assert result.yield_type == "completed"
+            result = engine.jump("set_x")
+            assert result.raw.get("status") == "yielded"
+            assert result.yield_type == "say"
+
+    @requires_sdk
+    @requires_fixture
+    def test_sequential_calls_both_complete(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result1 = engine.call("call_with_says")
+            assert result1.yield_type == "completed"
+            store1 = engine.get_store("call_result")
+            assert store1["call_result"] == "after"
+
+            engine.set_store(call_result="", inner_result="")
+            result2 = engine.call("call_nested")
+            assert result2.yield_type == "completed"
+            store2 = engine.get_store("call_result", "inner_result")
+            assert store2["call_result"] == "outer_done"
+            assert store2["inner_result"] == "inner_done"
+
+    @requires_sdk
+    @requires_fixture
+    def test_call_paused_then_jump_cancels(self):
+        with RenpyEngine(SDK_PATH, FIXTURE_GAME, timeout=15) as engine:
+            result = engine.call("call_with_menu")
+            assert result.raw.get("status") == "menu_waiting"
+            # Instead of selecting menu, jump somewhere else
+            result = engine.jump("set_x")
+            assert result.raw.get("status") == "yielded"
+            assert result.yield_type == "say"
+            store = engine.get_store("x")
+            assert store["x"] == 42
