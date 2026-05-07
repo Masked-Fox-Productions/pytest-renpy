@@ -376,6 +376,52 @@ System Python (3.12, where pytest runs) must communicate with SDK Python (3.9, w
    - Developer calls `renpy_session.breakpoint("label_name")` → engine runs until label, then yields
    - Nice-to-have, not essential for v1
 
+## Discoveries from Layer 1 Implementation
+
+The following items were deferred or discovered during Layer 1 implementation and are relevant to Layer 2 planning.
+
+### Label python: blocks (critical for minimum-viable-rpg)
+
+minimum-viable-rpg defines 18 utility functions (combat, inventory, healing, condition checks) inside `label init_utils: / python:` blocks. These are invisible to Layer 1's init-block extraction — they only exist after the engine executes the label. Layer 2 must execute label python: blocks to make these functions available. This is the most common pattern for complex game logic in normal Ren'Py projects.
+
+Similarly, minimum-viable-rpg puts all 19 `default` statements inside `label start:`, not at top level. Layer 2's store initialization must account for defaults declared within labels.
+
+### default inside labels
+
+Both `default` inside labels and variables set via `$ var = value` inside labels are Layer 2 concerns. The parser currently extracts top-level defaults only. Layer 2 needs to handle label-scoped defaults as part of label execution.
+
+### Multi-line define/default expressions
+
+The Layer 1 parser extracts `define` and `default` as single-line statements. kid-and-king has a multi-line `default BOOKS = { ... }` spanning 6 lines that fails to parse. Layer 2 could either:
+- Extend the parser with continuation-line support (look for unclosed brackets)
+- Let the engine handle these natively (since Layer 2 runs real Ren'Py)
+
+The engine-native approach is simpler and more correct, since Ren'Py's own parser handles arbitrary Python expressions in define/default.
+
+### Ren'Py built-in namespaces: gui, build, config
+
+All three reference projects have `gui.rpy`, `screens.rpy`, and `options.rpy` that reference Ren'Py-internal namespaces (`gui`, `build`, `Borders`, `_()` translation function). These fail in Layer 1's mock but will work natively in Layer 2. Layer 2 should verify that these files load cleanly.
+
+### terminalgame's Python 3.12 syntax error
+
+terminalgame's `display.rpy` has a `global` declaration after assignment in `does_show_character()` — valid in Ren'Py's Python 2-style runtime but rejected by Python 3.12. Since Layer 2 runs inside Ren'Py's bundled Python (3.9), this code should work correctly. This is a case where Layer 2 would succeed where Layer 1 fails.
+
+### display_menu as a core testing surface
+
+`renpy.display_menu()` is the programmatic menu API used by both kid-and-king and minimum-viable-rpg. Layer 2 needs robust menu interaction — send a choice by index or text match, inspect available options. Layer 1 mocks it to return the first option; Layer 2 should support test-driven selection.
+
+### Scene management APIs in game logic
+
+minimum-viable-rpg calls `renpy.scene()`, `renpy.show()`, `renpy.hide()`, `renpy.with_statement()` from Python code. Layer 2's yield-point detection should account for these — they're not control flow (don't raise exceptions) but they modify display state that tests may want to inspect.
+
+### Exception propagation through globals() dispatch
+
+terminalgame's `check_for_commands()` dispatches via `globals()[destination](message)`. When the destination function raises (e.g., `quit_command` raises `QuitException`), execution halts and the exception propagates through the dispatch chain. Layer 2's exception handling must correctly attribute these exceptions to the originating function, not to `check_for_commands` itself.
+
+### sys.path for .py file imports
+
+kid-and-king uses `from utils import *` in `init python:` to import `game/utils.py`. Layer 1 handles this via sys.path scoping during exec. Layer 2 inherits this from Ren'Py natively (the engine adds `game/` to sys.path), but the test harness should verify that imported .py modules are also reset-able between tests.
+
 ## Dependencies on Layer 1
 
 Layer 2 reuses from Layer 1:
