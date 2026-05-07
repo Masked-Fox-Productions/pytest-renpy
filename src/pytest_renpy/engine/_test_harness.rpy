@@ -123,7 +123,13 @@ init -999 python:
                     _ns["renpy"] = renpy
                     exec(cmd.get("code", ""), _ns)
                     _harness_send({"status": "ok"})
-                except (renpy.game.JumpException, renpy.game.CallException):
+                except renpy.game.CallException:
+                    global _harness_auto_advance_depth, _harness_pending_call_response, _harness_auto_advance_count
+                    _harness_auto_advance_depth = len(renpy.game.context().return_stack)
+                    _harness_pending_call_response = True
+                    _harness_auto_advance_count = 0
+                    raise
+                except renpy.game.JumpException:
                     raise
                 except Exception as e:
                     _harness_send({"status": "error", "message": str(e)})
