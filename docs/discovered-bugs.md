@@ -60,6 +60,36 @@ This is valid Ren'Py but not extractable by a single-line parser. Not a bug in t
 
 This is the most common Ren'Py pattern for complex games and is the primary motivation for Layer 2.
 
+## forests-bane
+
+### `reached_target` sentinel only set for small Bekri
+
+**File:** `game/npc_turns.rpy:507-634`
+
+The small Bekri movement block (lines 507-553) sets `Entities['monsters']['bekri']['reached_target'] = False` at the start and `= True` at the end. The medium Bekri block (lines 554-594) and large Bekri block (lines 597-634) do not set this flag at all. If any code depends on `reached_target` for medium or large Bekri, it will read stale data from a previous small Bekri turn or be missing entirely.
+
+Not confirmed as a player-facing bug — the flag may only be consumed in contexts where small Bekri is active. But the inconsistency across sizes is worth noting.
+
+### `attribute_check` uses CHARACTER_DETAILS + modifiers, not Entities dict
+
+**Files:** `game/attribute_check.rpy`, `game/npc_turns.rpy`
+
+The `attribute_check(entity, attribute, difficulty)` function reads base stats from `CHARACTER_DETAILS[character_name]` and adds `permanent_attribute_modifier` values, not from the `Entities` dict directly. Tests that set `Entities["special"]["player"]["grip"] = 999` are manipulating the wrong data structure — the attribute check reads from a different source. Affects 8 tests in test_bekri_flow.py across movement (grip/impression checks) and combat (ranged miss checks, melee dodge).
+
+This requires understanding the game's attribute resolution system (CHARACTER_DETAILS, persistent modifiers, inventory bonuses) to fix correctly — out of scope for the test harness.
+
+### `bekri_eat_arm` — missing `poisoned` key
+
+**File:** `game/npc_turns.rpy`
+
+`Entities["monsters"]["bekri"]` does not have a `poisoned` key by default. The `bekri_eat_arm()` function may set it conditionally, but accessing it unconditionally raises a KeyError. Test `test_eat_arm_consumes_poison_item` needs to use `.get("poisoned", False)` instead.
+
+### `delete_cmd` category parameter also unused here
+
+**File:** `game/keyboard.rpy` (same pattern as terminalgame)
+
+Forest's Bane shares the keyboard command system with terminalgame. The `delete_cmd(category, name)` function ignores its `category` parameter, same as documented under terminalgame above.
+
 ## Common across all projects
 
 ### gui.rpy / screens.rpy / options.rpy reference Ren'Py internals
