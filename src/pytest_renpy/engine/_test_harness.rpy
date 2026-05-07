@@ -11,6 +11,18 @@ init -999 python:
     _harness_buf = b""
     _harness_connected = False
 
+    _harness_auto_advance_depth = None
+    _harness_pending_call_response = False
+    _harness_auto_advance_count = 0
+    _HARNESS_SAFE_AUTO_ADVANCE_TYPES = {"say", "pause", "with"}
+    _HARNESS_AUTO_ADVANCE_LIMIT = 100
+
+    def _harness_clear_auto_advance():
+        global _harness_auto_advance_depth, _harness_pending_call_response, _harness_auto_advance_count
+        _harness_auto_advance_depth = None
+        _harness_pending_call_response = False
+        _harness_auto_advance_count = 0
+
     def _harness_connect():
         global _harness_sock, _harness_connected
         sock_path = _os.environ.get("RENPY_TEST_SOCKET")
@@ -105,11 +117,36 @@ init -999 python:
                     setattr(renpy.store, k, v)
                 _harness_send({"status": "ok"})
 
+            elif action == "exec":
+                try:
+                    _ns = vars(renpy.store)
+                    _ns["renpy"] = renpy
+                    exec(cmd.get("code", ""), _ns)
+                    _harness_send({"status": "ok"})
+                except (renpy.game.JumpException, renpy.game.CallException):
+                    raise
+                except Exception as e:
+                    _harness_send({"status": "error", "message": str(e)})
+
+            elif action == "eval":
+                try:
+                    _ns = vars(renpy.store)
+                    _ns["renpy"] = renpy
+                    result = eval(cmd.get("expr", "None"), _ns)
+                    _harness_send({"status": "ok", "result": _harness_serialize_value(result)})
+                except Exception as e:
+                    _harness_send({"status": "error", "message": str(e)})
+
             elif action == "jump":
+                _harness_clear_auto_advance()
                 raise renpy.game.JumpException(cmd["label"])
 
             elif action == "call":
-                raise renpy.game.CallException(cmd["label"])
+                global _harness_auto_advance_depth, _harness_pending_call_response, _harness_auto_advance_count
+                _harness_auto_advance_depth = len(renpy.game.context().return_stack)
+                _harness_pending_call_response = True
+                _harness_auto_advance_count = 0
+                raise renpy.game.CallException(cmd["label"], args=cmd.get("args", ()), kwargs=cmd.get("kwargs", {}), from_current=True)
 
             elif action == "advance":
                 return cmd
@@ -121,6 +158,7 @@ init -999 python:
                 return cmd
 
             elif action == "stop":
+                _harness_clear_auto_advance()
                 _harness_send({"status": "stopping"})
                 try:
                     _harness_sock.close()
@@ -134,21 +172,50 @@ init -999 python:
     _original_ui_interact = renpy.ui.interact
 
     def _patched_ui_interact(**kwargs):
+        global _harness_auto_advance_count
         if not _harness_connected:
             return _original_ui_interact(**kwargs)
 
         interact_type = kwargs.get("type", "unknown")
-        label = _harness_get_current_label()
 
-        response = {
+        if _harness_auto_advance_depth is not None:
+            current_depth = len(renpy.game.context().return_stack)
+
+            if current_depth > _harness_auto_advance_depth:
+                if _harness_auto_advance_count >= _HARNESS_AUTO_ADVANCE_LIMIT:
+                    _harness_clear_auto_advance()
+                    _harness_send({
+                        "status": "yielded",
+                        "at_label": _harness_get_current_label(),
+                        "yield_type": interact_type,
+                        "auto_advance_limit": True,
+                    })
+                    _harness_command_loop()
+                    return True
+
+                if interact_type in _HARNESS_SAFE_AUTO_ADVANCE_TYPES:
+                    _harness_auto_advance_count += 1
+                    return True
+
+                # Unsafe type during auto-advance — yield to IPC but keep state
+                _harness_send({
+                    "status": "yielded",
+                    "at_label": _harness_get_current_label(),
+                    "yield_type": interact_type,
+                })
+                _harness_command_loop()
+                return True
+
+            else:
+                _harness_clear_auto_advance()
+
+        label = _harness_get_current_label()
+        _harness_send({
             "status": "yielded",
             "at_label": label,
             "yield_type": interact_type,
-        }
-
-        _harness_send(response)
-
-        cmd = _harness_command_loop()
+        })
+        _harness_command_loop()
         return True
 
     _original_display_menu = renpy.display_menu
@@ -222,5 +289,19 @@ label splashscreen:
     python:
         if _harness_connected:
             _harness_send({"status": "ready"})
-            _harness_command_loop()
+    if _harness_connected:
+        call _harness_idle
+    return
+
+label _harness_idle:
+    python:
+        if _harness_pending_call_response:
+            _harness_clear_auto_advance()
+            _harness_send({
+                "status": "completed",
+                "at_label": _harness_get_current_label(),
+                "yield_type": "completed",
+            })
+        _harness_command_loop()
+    call _harness_idle from _harness_idle_return
     return

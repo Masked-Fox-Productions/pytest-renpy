@@ -254,8 +254,13 @@ class RenpyEngine:
     def get_store(self, *var_names: str) -> dict[str, Any]:
         if not var_names:
             resp = self.send_command({"cmd": "get_store", "vars": []})
-            return resp.get("values", {})
-        resp = self.send_command({"cmd": "get_store", "vars": list(var_names)})
+        else:
+            resp = self.send_command({"cmd": "get_store", "vars": list(var_names)})
+        status = resp.get("status")
+        if status == "error":
+            raise EngineError(resp.get("message", "get_store error"))
+        if status != "ok":
+            raise EngineError(f"Protocol desync: get_store got status '{status}'")
         return resp.get("values", {})
 
     def get_terminal_log(self) -> list[str] | None:
@@ -287,10 +292,48 @@ class RenpyEngine:
         text = ""
         if self._last_menu_options and 0 <= choice < len(self._last_menu_options):
             text = self._last_menu_options[choice].get("text", "")
+
+        if resp.get("status") == "menu_waiting":
+            self._pending_menu = resp
+            self._last_menu_options = resp.get("options", [])
+
         return MenuResult(choice=text, index=choice, raw=resp)
 
     def set_store(self, **kwargs: Any) -> None:
-        self.send_command({"cmd": "set_store", "vars": kwargs})
+        resp = self.send_command({"cmd": "set_store", "vars": kwargs})
+        status = resp.get("status")
+        if status == "error":
+            raise EngineError(resp.get("message", "set_store error"))
+        if status != "ok":
+            raise EngineError(f"Protocol desync: set_store got status '{status}'")
+
+    def exec_code(self, code: str) -> dict[str, Any] | None:
+        self._check_alive()
+        self._ipc.send_response({"cmd": "exec", "code": code})
+        try:
+            resp = self._ipc.receive_command()
+        except ConnectionError:
+            stderr = self._capture_stderr()
+            raise EngineError(f"Engine died during exec.\n{stderr}")
+        if resp.get("status") == "error":
+            raise EngineError(resp.get("message", "exec error"))
+        if resp.get("status") == "menu_waiting":
+            self._pending_menu = resp
+            self._last_menu_options = resp.get("options", [])
+            return resp
+        if resp.get("status") in ("yielded", "completed"):
+            self._pending_menu = None
+            return resp
+        return None
+
+    def eval_expr(self, expr: str) -> Any:
+        resp = self.send_command({"cmd": "eval", "expr": expr})
+        status = resp.get("status")
+        if status == "error":
+            raise EngineError(resp.get("message", "eval error"))
+        if status != "ok":
+            raise EngineError(f"Protocol desync: eval got status '{status}'")
+        return resp.get("result")
 
     def stop(self) -> None:
         if self._process and self._process.poll() is None:
