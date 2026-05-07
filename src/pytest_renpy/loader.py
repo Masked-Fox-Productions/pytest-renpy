@@ -34,12 +34,19 @@ class ProjectData:
     labels: list[Label] = field(default_factory=list)
     game_dir: Path | None = None
 
-    def execute_into(self, namespace: StoreNamespace, mock_renpy=None):
+    def execute_into(self, namespace: StoreNamespace, mock_renpy=None, on_error="raise"):
         """Execute all init blocks and apply defines/defaults into the namespace.
 
         Args:
             namespace: The StoreNamespace dict to execute code into.
             mock_renpy: A MockRenpy instance to inject. If None, creates a fresh one.
+            on_error: Error handling strategy for init blocks.
+                "raise" (default): re-raise the first error encountered.
+                "skip": skip blocks that fail and collect errors in returned list.
+
+        Returns:
+            List of (block, exception) tuples for skipped blocks when on_error="skip".
+            Empty list when on_error="raise".
         """
         if mock_renpy is None:
             mock_renpy = create_mock()
@@ -66,47 +73,69 @@ class ProjectData:
                 sys.path.insert(0, game_dir_str)
                 path_added = game_dir_str
 
+        errors = []
+
         try:
             for block in self.init_blocks:
                 try:
                     exec(block.code, namespace)  # noqa: S102
                 except SyntaxError as exc:
-                    raise SyntaxError(
+                    wrapped = SyntaxError(
                         f"{exc.msg} (from {block.source_file}:{block.source_line})",
                         (block.source_file,
                          (exc.lineno or 0) + block.source_line - 1,
                          exc.offset,
                          exc.text),
-                    ) from exc
+                    )
+                    wrapped.__cause__ = exc
+                    if on_error == "skip":
+                        errors.append((block, wrapped))
+                        continue
+                    raise wrapped from exc
                 except Exception as exc:
-                    raise RuntimeError(
+                    wrapped = RuntimeError(
                         f"Error executing init block from "
                         f"{block.source_file}:{block.source_line}: {exc}"
-                    ) from exc
+                    )
+                    wrapped.__cause__ = exc
+                    if on_error == "skip":
+                        errors.append((block, wrapped))
+                        continue
+                    raise wrapped from exc
 
             sorted_defines = sorted(self.defines, key=lambda d: d.priority)
             for defn in sorted_defines:
                 try:
                     namespace[defn.name] = eval(defn.expression, namespace)  # noqa: S307
                 except Exception as exc:
-                    raise RuntimeError(
+                    wrapped = RuntimeError(
                         f"Error evaluating define '{defn.name} = {defn.expression}': {exc}"
-                    ) from exc
+                    )
+                    if on_error == "skip":
+                        errors.append((None, wrapped))
+                        continue
+                    raise wrapped from exc
 
             for default in self.defaults:
                 if default.name not in namespace:
                     try:
                         namespace[default.name] = eval(default.expression, namespace)  # noqa: S307
                     except Exception as exc:
-                        raise RuntimeError(
+                        wrapped = RuntimeError(
                             f"Error evaluating default '{default.name} = {default.expression}': {exc}"
-                        ) from exc
+                        )
+                        if on_error == "skip":
+                            errors.append((None, wrapped))
+                            continue
+                        raise wrapped from exc
         finally:
             if path_added is not None:
                 try:
                     sys.path.remove(path_added)
                 except ValueError:
                     pass
+
+        return errors
 
 
 def load_project(project_dir: str | Path) -> ProjectData:
