@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytest-renpy"
+version = "0.1.0"
+description = "Pytest plugin for testing Ren'Py game logic without the engine"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Aaron Pogue", email = "aaron.pogue@gmail.com" },
+]
+classifiers = [
+    "Framework :: Pytest",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "pytest>=7.0",
+]
+
+[project.entry-points.pytest11]
+renpy = "pytest_renpy.plugin"
+
+[project.urls]
+Homepage = "https://github.com/masked-fox/pytest-renpy"
+Repository = "https://github.com/masked-fox/pytest-renpy"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytest_renpy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
