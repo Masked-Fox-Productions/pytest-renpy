@@ -107,6 +107,8 @@ class RenpyEngine:
         env["SDL_AUDIODRIVER"] = "dummy"
         env["RENPY_TEST_SOCKET"] = self._socket_path
         env["RENPY_TEST_SAVEDIR"] = self._save_dir
+        env["RENPY_LESS_UPDATES"] = "1"
+        env["RENPY_SIMPLE_EXCEPTIONS"] = "1"
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
 

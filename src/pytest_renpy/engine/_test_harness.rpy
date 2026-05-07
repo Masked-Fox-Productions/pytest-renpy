@@ -190,10 +190,15 @@ init -999 python:
 
         return None
 
+    def _noop_with(*args, **kwargs):
+        return False
+
     if _os.environ.get("RENPY_TEST_SOCKET"):
         renpy.ui.interact = _patched_ui_interact
         renpy.display_menu = _patched_display_menu
         renpy.exports.display_menu = _patched_display_menu
+        renpy.exports.with_statement = _noop_with
+        renpy.with_statement = _noop_with
 
         renpy.config.performance_test = False
 
@@ -208,6 +213,10 @@ init -999 python:
 init 999 python:
     if _os.environ.get("RENPY_TEST_SOCKET"):
         renpy.store.menu = _patched_display_menu
+
+        # Patch do_with to skip transitions (they require a display)
+        if renpy.game.interface is not None:
+            renpy.game.interface.do_with = lambda *args, **kwargs: False
 
 label splashscreen:
     python:
