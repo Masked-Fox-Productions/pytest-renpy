@@ -17,6 +17,18 @@ def pytest_addoption(parser):
         default=None,
         help="Path to the Ren'Py SDK directory (required for Layer 2 integration tests)",
     )
+    parser.addini(
+        "renpy_sdk",
+        help="Path to the Ren'Py SDK directory (alternative to --renpy-sdk flag)",
+        type="string",
+        default="",
+    )
+    parser.addini(
+        "renpy_project",
+        help="Path to the Ren'Py project directory (alternative to --renpy-project flag)",
+        type="string",
+        default="",
+    )
 
 
 def pytest_configure(config):

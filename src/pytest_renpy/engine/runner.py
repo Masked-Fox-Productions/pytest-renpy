@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from pytest_renpy.engine.ipc import IPCServer
+from pytest_renpy.sdk import validate_sdk_path
 
 
 class EngineError(Exception):
@@ -71,9 +72,9 @@ class RenpyEngine:
 
     def start(self) -> None:
         sdk_python = self._find_sdk_python()
-        renpy_main = self.sdk_path / "renpy.py"
-        if not renpy_main.exists():
+        if not validate_sdk_path(self.sdk_path):
             raise EngineError(f"renpy.py not found in SDK at {self.sdk_path}")
+        renpy_main = self.sdk_path / "renpy.py"
 
         if not self.project_path.is_dir():
             raise EngineError(f"Project directory not found: {self.project_path}")
