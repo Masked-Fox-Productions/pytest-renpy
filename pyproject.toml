@@ -24,6 +24,9 @@ dependencies = [
     "pytest>=7.0",
 ]
 
+[project.scripts]
+pytest-renpy = "pytest_renpy.cli:main"
+
 [project.entry-points.pytest11]
 renpy = "pytest_renpy.plugin"
 
