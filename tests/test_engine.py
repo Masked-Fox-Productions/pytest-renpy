@@ -13,12 +13,13 @@ from pytest_renpy.engine.runner import (
     NavigationResult,
     RenpyEngine,
 )
+from pytest_renpy.sdk import validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
+SDK_PATH = Path(os.environ.get("RENPY_SDK", os.path.expanduser("~/tools/renpy-8.3.7-sdk")))
 FIXTURE_GAME = Path(__file__).parent.parent / "spike" / "fixture_game"
 
 requires_sdk = pytest.mark.skipif(
-    not SDK_PATH.exists(), reason="Ren'Py SDK not found"
+    not validate_sdk_path(SDK_PATH), reason="Ren'Py SDK not found"
 )
 requires_fixture = pytest.mark.skipif(
     not FIXTURE_GAME.exists(), reason="Fixture game not found"

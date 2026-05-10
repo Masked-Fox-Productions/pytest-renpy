@@ -16,11 +16,14 @@ from pathlib import Path
 import pytest
 
 from pytest_renpy.engine.runner import EngineError, RenpyEngine
+from pytest_renpy.sdk import validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
-PROJECT_PATH = Path("/projects/xander/terminalgame")
+SDK_PATH = Path(os.environ.get("RENPY_SDK", os.path.expanduser("~/tools/renpy-8.3.7-sdk")))
+PROJECT_PATH = Path(os.environ.get("RENPY_PROJECT", "/projects/xander/terminalgame"))
 
-requires_sdk = pytest.mark.skipif(not SDK_PATH.exists(), reason="SDK not found")
+requires_sdk = pytest.mark.skipif(
+    not validate_sdk_path(SDK_PATH), reason="SDK not found"
+)
 requires_project = pytest.mark.skipif(
     not PROJECT_PATH.exists(), reason="terminalgame not found"
 )

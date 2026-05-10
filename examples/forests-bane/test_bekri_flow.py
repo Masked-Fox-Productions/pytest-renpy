@@ -4,7 +4,8 @@ Tests all branching label paths for Bekri's movement and combat across
 her three sizes (small, medium, large), including phase transitions,
 weapon-type branching, and attribute-check gating.
 
-Requires: Ren'Py SDK and the Forest's Bane project at /projects/xander/forests_bane
+Requires: Ren'Py SDK (via autodiscovery) and the Forest's Bane project
+(set RENPY_PROJECT or --renpy-project to the game root).
 """
 from __future__ import annotations
 
@@ -14,11 +15,14 @@ from pathlib import Path
 import pytest
 
 from pytest_renpy.engine.runner import RenpyEngine
+from pytest_renpy.sdk import validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
-PROJECT_PATH = Path("/projects/xander/forests_bane")
+SDK_PATH = Path(os.environ.get("RENPY_SDK", os.path.expanduser("~/tools/renpy-8.3.7-sdk")))
+PROJECT_PATH = Path(os.environ.get("RENPY_PROJECT", "/projects/xander/forests_bane"))
 
-requires_sdk = pytest.mark.skipif(not SDK_PATH.exists(), reason="SDK not found")
+requires_sdk = pytest.mark.skipif(
+    not validate_sdk_path(SDK_PATH), reason="SDK not found"
+)
 requires_project = pytest.mark.skipif(
     not PROJECT_PATH.exists(), reason="forests_bane not found"
 )

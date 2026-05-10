@@ -12,11 +12,14 @@ from pathlib import Path
 import pytest
 
 from pytest_renpy.engine.runner import RenpyEngine
+from pytest_renpy.sdk import validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
-PROJECT_PATH = Path("/projects/masked_fox/minimum-viable-rpg-renpy")
+SDK_PATH = Path(os.environ.get("RENPY_SDK", os.path.expanduser("~/tools/renpy-8.3.7-sdk")))
+PROJECT_PATH = Path(os.environ.get("RENPY_PROJECT", "/projects/masked_fox/minimum-viable-rpg-renpy"))
 
-requires_sdk = pytest.mark.skipif(not SDK_PATH.exists(), reason="SDK not found")
+requires_sdk = pytest.mark.skipif(
+    not validate_sdk_path(SDK_PATH), reason="SDK not found"
+)
 requires_project = pytest.mark.skipif(
     not PROJECT_PATH.exists(), reason="minimum-viable-rpg not found"
 )

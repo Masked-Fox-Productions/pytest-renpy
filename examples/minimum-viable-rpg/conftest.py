@@ -6,6 +6,7 @@ location constants, the get_base_location factory, and credits.
 Character defines use Transform for positioning.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,9 @@ from pytest_renpy.loader import load_project
 from pytest_renpy.mock_renpy import create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
 
-GAME_DIR = Path("/projects/masked_fox/minimum-viable-rpg-renpy/game")
+GAME_DIR = Path(
+    os.environ.get("RENPY_PROJECT", "/projects/masked_fox/minimum-viable-rpg-renpy")
+) / "game"
 
 
 def pytest_collection_modifyitems(config, items):
