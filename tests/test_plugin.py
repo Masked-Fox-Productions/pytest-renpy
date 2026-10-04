@@ -49,3 +49,8 @@ def test_exception_types_importable():
 
     assert ReturnException()
     assert QuitException()
+
+
+def test_renpy_on_error_option_in_help(pytester):
+    result = pytester.runpytest("--help")
+    result.stdout.fnmatch_lines(["*--renpy-on-error*"])

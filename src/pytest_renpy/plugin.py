@@ -17,6 +17,20 @@ def pytest_addoption(parser):
         default=None,
         help="Path to the Ren'Py SDK directory (required for Layer 2 integration tests)",
     )
+    group.addoption(
+        "--renpy-on-error",
+        action="store",
+        choices=("raise", "skip"),
+        default=None,
+        help="Layer 1 load errors: 'raise' (default) fails the test; 'skip' "
+        "skips the failing item and records it in renpy_load_errors",
+    )
+    parser.addini(
+        "renpy_on_error",
+        help="Layer 1 load error mode: raise (default) or skip",
+        type="string",
+        default="raise",
+    )
     parser.addini(
         "renpy_sdk",
         help="Path to the Ren'Py SDK directory (alternative to --renpy-sdk flag)",
