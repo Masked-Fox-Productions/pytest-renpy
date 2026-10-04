@@ -26,7 +26,7 @@ jobs:
         run: pip install -e .
 
       - name: Cache Ren'Py SDK
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.renpy-sdk/
           key: renpy-sdk-${{ env.RENPY_SDK_VERSION }}
