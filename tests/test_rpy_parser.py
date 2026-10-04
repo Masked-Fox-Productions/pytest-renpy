@@ -706,3 +706,512 @@ def test_mixed_indent_widths_across_blocks(tmp_path):
     assert len(result.init_blocks) == 2
     compile(result.init_blocks[0].code, "<test>", "exec")
     compile(result.init_blocks[1].code, "<test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Logical lines: multi-line define/default
+# ---------------------------------------------------------------------------
+
+
+def _parse(tmp_path, content, name="test.rpy"):
+    rpy = tmp_path / name
+    rpy.write_text(content, encoding="utf-8")
+    return parse_file(rpy)
+
+
+def test_multiline_default_dict(tmp_path):
+    """kid-and-king BOOKS shape: a default spanning several lines."""
+    result = _parse(
+        tmp_path,
+        "default BOOKS = {\n"
+        '    "a": 1,\n'
+        '    "b": 2,\n'
+        '    "c": 3,\n'
+        '    "d": 4,\n'
+        "}\n",
+    )
+    assert len(result.defaults) == 1
+    d = result.defaults[0]
+    assert d.name == "BOOKS"
+    assert d.source_line == 1
+    assert eval(d.expression) == {"a": 1, "b": 2, "c": 3, "d": 4}
+
+
+def test_multiline_define_nested_dicts(tmp_path):
+    result = _parse(
+        tmp_path,
+        "define WEAPONS = {\n"
+        '    "sword": {\n'
+        '        "damage": 3,\n'
+        '        "tags": ["sharp", "metal",],\n'
+        "    },\n"
+        '    "club": {"damage": 2},\n'
+        "}\n"
+        "define AFTER = 1\n",
+    )
+    assert [d.name for d in result.defines] == ["WEAPONS", "AFTER"]
+    assert eval(result.defines[0].expression)["sword"]["tags"] == ["sharp", "metal"]
+    assert result.defines[1].source_line == 8
+
+
+def test_triple_quoted_define(tmp_path):
+    result = _parse(
+        tmp_path,
+        'define gui.about = _p("""\n'
+        "First paragraph.\n"
+        "\n"
+        "label not_a_label:\n"
+        '""")\n'
+        "define x = 1\n",
+    )
+    assert [d.name for d in result.defines] == ["gui.about", "x"]
+    assert result.labels == []
+
+
+def test_brackets_inside_strings_ignored(tmp_path):
+    result = _parse(
+        tmp_path,
+        "define a = \"{\"\n"
+        "define b = ('(', ')')\n"
+        "define c = [1,\n"
+        "    2]\n",
+    )
+    assert [eval(d.expression) for d in result.defines] == ["{", ("(", ")"), [1, 2]]
+
+
+def test_statement_text_inside_literal_not_dispatched(tmp_path):
+    result = _parse(
+        tmp_path,
+        "define TABLE = [\n"
+        "label fake:\n"
+        "define fake = 1\n"
+        "]\n",
+    )
+    assert [d.name for d in result.defines] == ["TABLE"]
+    assert result.labels == []
+
+
+def test_comments_and_blanks_inside_literal(tmp_path):
+    result = _parse(
+        tmp_path,
+        "default stats = {\n"
+        "    # a comment with { and \" in it\n"
+        "\n"
+        '    "hp": 10,  # trailing ( comment\n'
+        "}\n",
+    )
+    assert eval(result.defaults[0].expression) == {"hp": 10}
+
+
+def test_multiline_dialogue_hides_default(tmp_path):
+    result = _parse(
+        tmp_path,
+        'e "first line\n'
+        "default score = 99\n"
+        'last line"\n'
+        "default real = 1\n",
+    )
+    assert [d.name for d in result.defaults] == ["real"]
+    assert result.defaults[0].source_line == 4
+
+
+def test_single_quoted_string_spanning_lines(tmp_path):
+    result = _parse(tmp_path, "define s = 'a\nb'\ndefine t = 2\n")
+    assert [(d.name, d.source_line) for d in result.defines] == [("s", 1), ("t", 3)]
+
+
+def test_backslash_continuation(tmp_path):
+    result = _parse(tmp_path, "define total = 1 + \\\n    2\ndefine t = 2\n")
+    assert eval(result.defines[0].expression) == 3
+    assert result.defines[1].source_line == 3
+
+
+def test_init_python_continuation_indented_less(tmp_path):
+    """A bracketed continuation line shallower than the body doesn't end the block."""
+    result = _parse(
+        tmp_path,
+        "init python:\n"
+        "    DATA = [\n"
+        "1, 2,\n"
+        "    ]\n"
+        "    AFTER = len(DATA)\n",
+    )
+    assert len(result.init_blocks) == 1
+    ns = {}
+    exec(result.init_blocks[0].code, ns)
+    assert ns["AFTER"] == 2
+
+
+def test_fstring_nested_same_quotes(tmp_path):
+    result = _parse(
+        tmp_path,
+        'define msg = f"{d["k"]}"\n'
+        "define after = 1\n",
+    )
+    assert [d.name for d in result.defines] == ["msg", "after"]
+    assert result.parse_errors == []
+
+
+def test_unterminated_bracket_drops_rest_of_file(tmp_path):
+    result = _parse(
+        tmp_path,
+        "define BEFORE = 0\n"
+        "define BROKEN = {\n"
+        "define AFTER = 1\n",
+    )
+    assert [d.name for d in result.defines] == ["BEFORE"]
+    assert len(result.parse_errors) == 1
+    err = result.parse_errors[0]
+    assert err.source_file.endswith("test.rpy")
+    assert err.source_line == 2
+    assert "bracket" in str(err)
+
+
+def test_unterminated_string_at_eof(tmp_path):
+    result = _parse(
+        tmp_path,
+        "define BEFORE = 0\n"
+        "init python:\n"
+        "    x = 1\n"
+        '    y = "never closed\n',
+    )
+    assert [d.name for d in result.defines] == ["BEFORE"]
+    # The init block containing the bad line is dropped, not truncated.
+    assert result.init_blocks == []
+    assert result.parse_errors[0].source_line == 4
+    assert "string opened on line 4" in str(result.parse_errors[0])
+
+
+def test_init_block_line_mapping_with_comments_and_blanks(tmp_path):
+    """A runtime error inside an init block maps to the .rpy line."""
+    rpy = tmp_path / "test.rpy"
+    rpy.write_text(
+        "init python:\n"
+        "    def ok():\n"
+        "        return 1\n"
+        "# a comment at column 0\n"
+        "\n"
+        "    def boom():\n"
+        "        raise KeyError('x')\n"
+    )
+    block = parse_file(rpy).init_blocks[0]
+    raise_line = block.code.split("\n").index("    raise KeyError('x')")
+    assert block.code_line + raise_line == 7
+
+
+def test_triple_quoted_string_in_block_not_dedented(tmp_path):
+    result = _parse(
+        tmp_path,
+        "init python:\n"
+        '    TEXT = """line one\n'
+        "        indented two\n"
+        '    three"""\n',
+    )
+    ns = {}
+    exec(result.init_blocks[0].code, ns)
+    assert ns["TEXT"] == "line one\n        indented two\n    three"
+
+
+def test_bom_then_init_offset(tmp_path):
+    rpy = tmp_path / "gui.rpy"
+    rpy.write_bytes("\ufeffinit offset = -2\ndefine gui.x = 1\n".encode("utf-8"))
+    result = parse_file(rpy)
+    assert result.defines[0].priority == -2
+
+
+def test_define_default_carry_location(tmp_path):
+    result = _parse(tmp_path, "\ndefine a = 1\n\ndefault b = 2\n")
+    assert (result.defines[0].source_file, result.defines[0].source_line) == (
+        str(tmp_path / "test.rpy"),
+        2,
+    )
+    assert result.defaults[0].source_line == 4
+
+
+# ---------------------------------------------------------------------------
+# Label bodies: hoisting init-time statements
+# ---------------------------------------------------------------------------
+
+
+def test_init_python_inside_label(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label init_utils:\n"
+        "    init python:\n"
+        "        def f():\n"
+        "            return 1\n",
+    )
+    assert len(result.init_blocks) == 1
+    block = result.init_blocks[0]
+    assert block.source_line == 2
+    ns = {}
+    exec(block.code, ns)
+    assert ns["f"]() == 1
+
+
+def test_init_python_priority_store_inside_label(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label x:\n"
+        "    init -5 python in mystore:\n"
+        "        a = 1\n"
+        "    init python hide:\n"
+        "        b = 1\n"
+        "    init python in a.b:\n"
+        "        c = 1\n",
+    )
+    assert [(b.priority, b.store_name) for b in result.init_blocks] == [
+        (-5, "mystore"),
+        (0, None),
+        (0, "a.b"),
+    ]
+
+
+def test_multiline_default_inside_label(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label init_item_library:\n"
+        "    default item_library = {\n"
+        '        "potion": 1,\n'
+        "    }\n"
+        "    return\n",
+    )
+    assert result.defaults[0].name == "item_library"
+    assert eval(result.defaults[0].expression) == {"potion": 1}
+
+
+def test_explicit_priorities_on_define_and_default(tmp_path):
+    result = _parse(tmp_path, "default 5 late = 1\ndefine -3 early = 0\n")
+    assert result.defaults[0].priority == 5
+    assert result.defines[0].priority == -3
+
+
+def test_label_continues_after_init_python(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        "    init python:\n"
+        "        x = 1\n"
+        '    "Some dialogue"\n'
+        "    define later = 2\n"
+        "    init python:\n"
+        "        y = 2\n"
+        "label b:\n"
+        "    define in_b = 3\n",
+    )
+    assert len(result.init_blocks) == 2
+    assert result.init_blocks[0].code == "x = 1"
+    assert [d.name for d in result.defines] == ["later", "in_b"]
+    assert [l.name for l in result.labels] == ["a", "b"]
+
+
+def test_forests_bane_shape_comment_at_lower_indent(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label init_utils:\n"
+        "    init python:\n"
+        "        def one():\n"
+        "            return 1\n"
+        "    # section comment at label indent\n"
+        "        def two():\n"
+        "            return 2\n",
+    )
+    assert len(result.init_blocks) == 1
+    ns = {}
+    exec(result.init_blocks[0].code, ns)
+    assert ns["two"]() == 2
+
+
+def test_init_offset_toplevel(tmp_path):
+    result = _parse(
+        tmp_path,
+        "init offset = -2\n"
+        "define gui.x = 1\n"
+        "init python:\n"
+        "    a = 1\n"
+        "init offset = 0\n"
+        "define y = 1\n",
+    )
+    assert [d.priority for d in result.defines] == [-2, 0]
+    assert result.init_blocks[0].priority == -2
+
+
+def test_init_offset_block_scoped(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        "    init offset = 5\n"
+        "    define in_label = 1\n"
+        "define after = 1\n",
+    )
+    assert [(d.name, d.priority) for d in result.defines] == [
+        ("in_label", 5),
+        ("after", 0),
+    ]
+
+
+def test_init_offset_inherited_by_label(tmp_path):
+    result = _parse(tmp_path, "init offset = -2\nlabel a:\n    define x = 1\n")
+    assert result.defines[0].priority == -2
+
+
+def test_enclosing_init_priority(tmp_path):
+    result = _parse(
+        tmp_path,
+        "init -10:\n"
+        "    define d = 1\n"
+        "    define 5 e = 2\n"
+        "    default f = 3\n",
+    )
+    assert [d.priority for d in result.defines] == [-10, -10]
+    assert result.defaults[0].priority == -10
+
+    result = _parse(
+        tmp_path,
+        "init offset = 3\n"
+        "init -10:\n"
+        "    define d = 1\n"
+        "    default f = 3\n",
+        name="offset.rpy",
+    )
+    assert result.defines[0].priority == -7
+    assert result.defaults[0].priority == -7
+
+
+def test_nested_init_keeps_own_priority(tmp_path):
+    result = _parse(
+        tmp_path,
+        "init -10:\n"
+        "    init python:\n"
+        "        X = 1\n"
+        "    init 5 python:\n"
+        "        Y = 1\n",
+    )
+    assert [b.priority for b in result.init_blocks] == [0, 5]
+
+
+def test_python_and_dollar_inside_init_block(tmp_path):
+    """MVR shape: `init:` / `$ ...`, and `init -1:` / `python:`."""
+    result = _parse(
+        tmp_path,
+        "init:\n"
+        "    call init_utils\n"
+        "    $ config.rollback_enabled = False\n"
+        "init -1:\n"
+        "    python:\n"
+        "        X = 1\n",
+    )
+    assert [(b.priority, b.code, b.source_line) for b in result.init_blocks] == [
+        (0, "config.rollback_enabled = False", 3),
+        (-1, "X = 1", 5),
+    ]
+
+
+def test_dialogue_continuation_in_label_not_hoisted(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        '    e "first\n'
+        "    default score = 99\n"
+        '    last"\n',
+    )
+    assert result.defaults == []
+
+
+def test_define_inside_triple_quoted_python_string_not_hoisted(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        "    python:\n"
+        '        s = """\n'
+        "define x = 1\n"
+        '        """\n',
+    )
+    assert result.defines == []
+
+
+def test_screen_default_not_extracted(tmp_path):
+    result = _parse(
+        tmp_path,
+        "screen top:\n"
+        "    default local = 1\n"
+        "label a:\n"
+        "    pass\n"
+        "screen after_label:\n"
+        "    default other = 1\n"
+        "    python:\n"
+        "        z = 1\n",
+    )
+    assert result.defaults == []
+    assert result.init_blocks == []
+
+
+def test_label_python_block_not_hoisted(tmp_path):
+    """R10: plain python: in a label stays runtime (MVR layer boundary)."""
+    result = _parse(
+        tmp_path,
+        "label init_utils:\n"
+        "    python:\n"
+        "        def g():\n"
+        "            return 1\n",
+    )
+    assert result.init_blocks == []
+
+
+def test_define_inside_label_if_block_hoisted(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        "    if True:\n"
+        "        define nested = 1\n",
+    )
+    assert result.defines[0].name == "nested"
+
+
+def test_label_metadata_location(tmp_path):
+    result = _parse(tmp_path, "\nlabel start:\n    pass\n")
+    assert (result.labels[0].name, result.labels[0].source_line) == ("start", 2)
+    assert result.labels[0].source_file == str(tmp_path / "test.rpy")
+
+
+def test_label_body_statements_recorded(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label a:\n"
+        '    e "Hi"\n'
+        "    $ x = {\n"
+        "        1: 2,\n"
+        "    }\n"
+        "    python:\n"
+        "        y = 1\n"
+        "    menu:\n"
+        '        "Choice":\n'
+        "            $ z = 1\n"
+        "    define d = 1\n",
+    )
+    body = result.labels[0].body
+    assert [(s.kind, s.source_line) for s in body] == [
+        ("e", 2),
+        ("python", 3),
+        ("python", 6),
+        ("menu", 8),
+        ("define", 11),
+    ]
+    assert eval(compile(body[1].code, "<t>", "exec")) is None
+    assert body[2].code == "y = 1"
+    assert body[2].code_line == 7
+
+
+def test_transform_statement_recorded(tmp_path):
+    result = _parse(
+        tmp_path,
+        "transform slide_down:\n"
+        "    yoffset -50\n"
+        "init offset = -1\n"
+        "transform 2 pulse(d=1.0):\n"
+        "    alpha 1.0\n",
+    )
+    assert [(t.name, t.priority, t.source_line) for t in result.transforms] == [
+        ("slide_down", 0, 1),
+        ("pulse", 1, 4),
+    ]

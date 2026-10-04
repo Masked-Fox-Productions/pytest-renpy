@@ -28,8 +28,9 @@ class _NoOpStub:
     Also permissive for chained attribute access (e.g., renpy.music.play).
     """
 
-    def __init__(self, name="unknown"):
+    def __init__(self, name="unknown", prefix="renpy."):
         self._name = name
+        self._prefix = prefix
         self._calls = []
         self._children = {}
 
@@ -41,11 +42,11 @@ class _NoOpStub:
         if name.startswith("_"):
             raise AttributeError(name)
         if name not in self._children:
-            self._children[name] = _NoOpStub(f"{self._name}.{name}")
+            self._children[name] = _NoOpStub(f"{self._name}.{name}", self._prefix)
         return self._children[name]
 
     def __repr__(self):
-        return f"<NoOpStub: renpy.{self._name}>"
+        return f"<NoOpStub: {self._prefix}{self._name}>"
 
 
 class MockRenpy:
