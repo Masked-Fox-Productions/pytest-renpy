@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from pytest_renpy.loader import ProjectData, load_project
+from pytest_renpy.loader import LabelRunResult, ProjectData, load_project
 from pytest_renpy.mock_renpy import create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
 from pytest_renpy.engine.runner import RenpyEngine
@@ -21,6 +21,24 @@ class RenpyGame:
     store: StoreNamespace
     mock: object
     labels: list
+    project: ProjectData | None = None
+    load_errors: list = field(default_factory=list)
+
+    def run_label_python(self, name: str) -> LabelRunResult:
+        """Run label ``name``'s Python statements against this game's store."""
+        if self.project is None:
+            raise RuntimeError("RenpyGame has no project; build it via the renpy_game fixture")
+        return self.project.run_label_python(name, self.store)
+
+
+def _on_error_mode(config) -> str:
+    mode = config.getoption("--renpy-on-error") or config.getini("renpy_on_error")
+    mode = (mode or "raise").strip()
+    if mode not in ("raise", "skip"):
+        raise pytest.UsageError(
+            f"renpy_on_error must be 'raise' or 'skip', not {mode!r}"
+        )
+    return mode
 
 
 def _resolve_game_dir(project_path: Path) -> Path:
@@ -49,20 +67,37 @@ def renpy_mock():
 
 
 @pytest.fixture
-def renpy_store(renpy_project, renpy_mock) -> StoreNamespace:
+def renpy_load_errors() -> list:
+    """Function-scoped fixture: (item, exception) pairs skipped while loading.
+
+    Only populated when the error mode is ``skip`` (``--renpy-on-error`` or
+    the ``renpy_on_error`` ini option); in ``raise`` mode loading fails the
+    test instead.
+    """
+    return []
+
+
+@pytest.fixture
+def renpy_store(request, renpy_project, renpy_mock, renpy_load_errors) -> StoreNamespace:
     """Function-scoped fixture: fresh store with game init blocks executed."""
     ns = StoreNamespace()
-    renpy_project.execute_into(ns, mock_renpy=renpy_mock)
+    renpy_load_errors.extend(
+        renpy_project.execute_into(
+            ns, mock_renpy=renpy_mock, on_error=_on_error_mode(request.config)
+        )
+    )
     return ns
 
 
 @pytest.fixture
-def renpy_game(renpy_project, renpy_store, renpy_mock) -> RenpyGame:
+def renpy_game(renpy_project, renpy_store, renpy_mock, renpy_load_errors) -> RenpyGame:
     """Function-scoped fixture: combined game environment for testing."""
     return RenpyGame(
         store=renpy_store,
         mock=renpy_mock,
         labels=renpy_project.labels,
+        project=renpy_project,
+        load_errors=renpy_load_errors,
     )
 
 

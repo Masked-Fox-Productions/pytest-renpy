@@ -1,14 +1,16 @@
 """Tests for project loader."""
 
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from pytest_renpy import JumpException, QuitException
+from pytest_renpy import CallException, JumpException, QuitException, ReturnException
 from pytest_renpy.loader import ProjectData, load_project
-from pytest_renpy.mock_renpy import create_mock
+from pytest_renpy.mock_renpy import MockPersistent, create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
+from pytest_renpy.rpy_parser import ParseError
 
 
 @pytest.fixture
@@ -174,7 +176,8 @@ class TestExecuteInto:
         project.execute_into(ns)
         assert ns["score"] == 0
 
-    def test_defaults_do_not_overwrite_existing(self, game_dir):
+    def test_defaults_overwrite_init_code(self, game_dir):
+        """Like Ren'Py at game start, a default wins over init-time assignment."""
         write_rpy(
             game_dir,
             "script.rpy",
@@ -182,6 +185,13 @@ class TestExecuteInto:
         )
         project = load_project(game_dir)
         ns = StoreNamespace()
+        project.execute_into(ns)
+        assert ns["score"] == 0
+
+    def test_defaults_do_not_overwrite_caller_preseeded(self, game_dir):
+        write_rpy(game_dir, "script.rpy", "default score = 0\n")
+        project = load_project(game_dir)
+        ns = StoreNamespace(score=100)
         project.execute_into(ns)
         assert ns["score"] == 100
 
@@ -361,3 +371,472 @@ class TestIntegrationWithTerminalgame:
             )
         with pytest.raises(QuitException):
             ns["check_for_commands"]("quit")
+
+
+def load_ns(game_dir, on_error="raise", **kwargs):
+    """Load the project in game_dir and execute it into a fresh namespace."""
+    project = load_project(game_dir)
+    ns = kwargs.pop("namespace", None) or StoreNamespace()
+    errors = project.execute_into(ns, on_error=on_error, **kwargs)
+    return ns, errors
+
+
+class TestInitStreamOrdering:
+    def test_init_block_reads_earlier_define_in_same_file(self, game_dir):
+        write_rpy(
+            game_dir, "a.rpy", "define X = 5\ninit python:\n    y = X * 2\n"
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["y"] == 10
+
+    def test_define_priority_honored(self, game_dir):
+        write_rpy(
+            game_dir, "a.rpy", "define 5 X = 1\ninit python:\n    y = X\n"
+        )
+        with pytest.raises(RuntimeError, match="name 'X' is not defined"):
+            load_ns(game_dir)
+
+    def test_init_offset_beats_filename_order(self, game_dir):
+        write_rpy(game_dir, "aa_game.rpy", "init python:\n    y = G\n")
+        write_rpy(game_dir, "zz_gui.rpy", "init offset = -2\ndefine G = 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["y"] == 1
+
+    def test_persistent_default_applies_in_stream(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "default persistent.seen = {}\n"
+            "init python:\n"
+            "    persistent.seen['intro'] = True\n",
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["persistent"].seen == {"intro": True}
+
+    def test_label_nested_persistent_default_visible_to_later_file(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "label setup:\n    default persistent.flags = set()\n",
+        )
+        write_rpy(game_dir, "b.rpy", "init python:\n    persistent.flags.add(1)\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["persistent"].flags == {1}
+
+    def test_ordinary_defaults_ordered_by_priority(self, game_dir):
+        write_rpy(game_dir, "zz.rpy", "default -1 base = 10\n")
+        write_rpy(game_dir, "aa.rpy", "default derived = base * 2\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["derived"] == 20
+
+    def test_ordinary_defaults_ordered_by_file(self, game_dir):
+        write_rpy(game_dir, "aa.rpy", "default first = 1\n")
+        write_rpy(game_dir, "zz.rpy", "default second = first + 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["second"] == 2
+
+    def test_init_offset_applies_to_defaults(self, game_dir):
+        write_rpy(game_dir, "zz.rpy", "init offset = -5\ndefault early = 1\n")
+        write_rpy(game_dir, "aa.rpy", "default late = early + 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["late"] == 2
+
+    def test_ordinary_defaults_run_after_all_init(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "default d = LATE\n")
+        write_rpy(game_dir, "b.rpy", "init 999 python:\n    LATE = 'late'\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["d"] == "late"
+
+    def test_file_order_uses_relative_path_without_suffix(self, game_dir):
+        sub = game_dir / "sub"
+        sub.mkdir()
+        write_rpy(game_dir, "a-b.rpy", "init python:\n    order.append('a-b')\n")
+        write_rpy(game_dir, "a.rpy", "init python:\n    order.append('a')\n")
+        write_rpy(sub, "x.rpy", "init python:\n    order.append('sub/x')\n")
+        write_rpy(game_dir, "0.rpy", "init -1 python:\n    order = []\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["order"] == ["a", "a-b", "sub/x"]
+
+
+class TestNamespaceTargets:
+    def test_define_config_sets_attribute(self, game_dir):
+        write_rpy(game_dir, "a.rpy", 'define config.name = "Game"\n')
+        ns, _ = load_ns(game_dir)
+        assert ns["config"].name == "Game"
+        assert "config.name" not in ns
+        assert ns["renpy"].config is ns["config"]
+
+    def test_default_persistent_on_fresh(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "default persistent.seen = 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["persistent"].seen == 1
+
+    def test_default_persistent_keeps_existing(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "default persistent.seen = 1\n")
+        p = MockPersistent()
+        p.seen = 5
+        ns, _ = load_ns(game_dir, persistent=p)
+        assert ns["persistent"] is p
+        assert p.seen == 5
+
+    def test_define_persistent_set_if_none(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "define persistent.flag = 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["persistent"].flag == 1
+        p = MockPersistent()
+        p.flag = 5
+        load_ns(game_dir, persistent=p)
+        assert p.flag == 5
+
+    def test_named_store_default_creates_holder(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "default mystore.score = 0\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["mystore"].score == 0
+
+    def test_named_store_default_respects_caller_value(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "default mystore.score = 0\n")
+        ns = StoreNamespace(mystore=types.SimpleNamespace(score=3))
+        load_ns(game_dir, namespace=ns)
+        assert ns["mystore"].score == 3
+
+    def test_named_store_default_overwrites_init_value(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "init python:\n"
+            "    import types\n"
+            "    mystore = types.SimpleNamespace(score=3)\n"
+            "default mystore.score = 0\n",
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["mystore"].score == 0
+
+    def test_multilevel_define(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "define a.b.c = 1\n")
+        ns, _ = load_ns(game_dir)
+        assert ns["a"].b.c == 1
+
+    def test_define_into_plain_dict_is_error(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "init python:\n    gamedata = {}\n\ndefine gamedata.x = 1\n",
+        )
+        with pytest.raises(RuntimeError, match=r"a\.rpy:4"):
+            load_ns(game_dir)
+
+    def test_default_overwrites_injected_builtin(self, game_dir):
+        write_rpy(
+            game_dir, "a.rpy", "init python:\n    x = 1\ndefault x = 2\ndefault build = []\n"
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["x"] == 2
+        assert ns["build"] == []
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "define preferences.text_cps = 1",
+            "define renpy.foo = 1",
+            "default renpy.foo = 1",
+            "default config.x = 1",
+        ],
+    )
+    def test_forbidden_namespace_targets(self, game_dir, line):
+        write_rpy(game_dir, "a.rpy", "\n" + line + "\n")
+        with pytest.raises(RuntimeError, match=r"a\.rpy:2"):
+            load_ns(game_dir)
+        ns, errors = load_ns(game_dir, on_error="skip")
+        assert len(errors) == 1
+        assert errors[0][0].source_line == 2
+
+    def test_define_operators(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "define items = [1]\ndefine items += [2]\ndefine flags = {1}\ndefine flags |= {2}\n",
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["items"] == [1, 2]
+        assert ns["flags"] == {1, 2}
+
+    def test_transform_name_defined(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "transform slide_down:\n"
+            "    yoffset -50\n"
+            "define slide_in = MoveTransition(0.5, enter=slide_down)\n",
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["slide_in"].kwargs["enter"] is ns["slide_down"]
+
+
+class TestLoadErrorLocations:
+    def test_define_and_default_errors_carry_location(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "define bad_define = missing_name\n\ndefault bad_default = 1 / 0\n",
+        )
+        with pytest.raises(RuntimeError, match=r"a\.rpy:1"):
+            load_ns(game_dir)
+        _, errors = load_ns(game_dir, on_error="skip")
+        assert [(type(item).__name__, item.source_line) for item, _ in errors] == [
+            ("Define", 1),
+            ("Default", 3),
+        ]
+        assert "a.rpy:3" in str(errors[1][1])
+
+    def test_syntax_error_maps_to_rpy_line(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "init python:\n    x = 1\n    # comment\n\n    y = (\n    z = 1 +\n",
+        )
+        _, errors = load_ns(game_dir, on_error="skip")
+        # Unterminated bracket: recorded as a parse error, not a crash.
+        assert isinstance(errors[0][1], ParseError)
+
+        write_rpy(game_dir, "a.rpy", "init python:\n    x = 1\n\n    y = = 1\n")
+        _, errors = load_ns(game_dir, on_error="skip")
+        exc = errors[0][1]
+        assert isinstance(exc, SyntaxError)
+        assert exc.lineno == 4
+
+    def test_runtime_traceback_points_at_rpy_line(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "init python:\n"
+            "    def ok():\n"
+            "        return 1\n"
+            "# column-0 comment\n"
+            "\n"
+            "    def boom():\n"
+            "        raise KeyError('x')\n",
+        )
+        ns, _ = load_ns(game_dir)
+        with pytest.raises(KeyError) as exc_info:
+            ns["boom"]()
+        frame = exc_info.traceback[-1]
+        assert frame.path == game_dir / "a.rpy"
+        assert frame.lineno + 1 == 7  # pytest's lineno is 0-based
+
+    def test_parse_error_does_not_block_other_files(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "define X = {\n")
+        write_rpy(game_dir, "b.rpy", "define Y = 1\n")
+        ns, errors = load_ns(game_dir, on_error="skip")
+        assert ns["Y"] == 1
+        assert len(errors) == 1
+        item, exc = errors[0]
+        assert isinstance(exc, ParseError)
+        assert (Path(item.source_file).name, item.source_line) == ("a.rpy", 1)
+        with pytest.raises(ParseError):
+            load_ns(game_dir)
+
+    def test_globals_dispatch_with_two_arg_exec(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "init python:\n"
+            "    def handler():\n"
+            "        return 'ok'\n"
+            "    def dispatch(name):\n"
+            "        return globals()[name]()\n",
+        )
+        ns, _ = load_ns(game_dir)
+        assert ns["dispatch"]("handler") == "ok"
+
+
+class TestRunLabelPython:
+    def test_runs_python_statements_in_order(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "label init_state:\n"
+            "    $ a = 1\n"
+            "    $ b = {\n"
+            "        'x': a,\n"
+            "    }\n"
+            "    python:\n"
+            "        b['y'] = 2\n"
+            "    return\n",
+        )
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        result = project.run_label_python("init_state", ns)
+        assert ns["b"] == {"x": 1, "y": 2}
+        assert [s.source_line for s in result.executed] == [2, 3, 6]
+        assert [s.kind for s in result.skipped] == ["return"]
+
+    def test_skips_dialogue_and_display(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            'define e = Character("Eileen")\n'
+            "label scene_one:\n"
+            "    scene bg room\n"
+            "    show eileen happy\n"
+            "    with dissolve\n"
+            '    e "Hello"\n'
+            "    $ seen = True\n"
+            '    "Narration"\n'
+            '    $ e("spoken from python")\n',
+        )
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        result = project.run_label_python("scene_one", ns)
+        assert ns["seen"] is True
+        assert [s.kind for s in result.skipped] == ["scene", "show", "with", "e", "say"]
+        assert len(result.executed) == 2
+
+    def test_multiline_dialogue_hides_dollar_line(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "label a:\n"
+            '    "first\n'
+            "    $ x = 1\n"
+            '    last"\n',
+        )
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        result = project.run_label_python("a", ns)
+        assert "x" not in ns
+        assert len(result.skipped) == 1
+
+    def test_renpy_if_block_skipped(self, game_dir):
+        write_rpy(
+            game_dir,
+            "a.rpy",
+            "label a:\n"
+            "    if True:\n"
+            "        $ inside = 1\n"
+            "    $ after = 1\n",
+        )
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        result = project.run_label_python("a", ns)
+        assert "inside" not in ns
+        assert ns["after"] == 1
+        assert [(s.kind, s.source_line) for s in result.skipped] == [("if", 2)]
+
+    def test_jump_propagates(self, game_dir):
+        write_rpy(game_dir, "a.rpy", 'label a:\n    $ renpy.jump("x")\n')
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        with pytest.raises(JumpException) as exc_info:
+            project.run_label_python("a", ns)
+        assert exc_info.value.target == "x"
+
+    def test_error_names_file_and_line(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "label a:\n    $ ok = 1\n    $ d = {}['k']\n")
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        with pytest.raises(RuntimeError, match=r"a\.rpy:3") as exc_info:
+            project.run_label_python("a", ns)
+        assert isinstance(exc_info.value.__cause__, KeyError)
+
+    def test_unknown_label(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "label init_state:\n    $ a = 1\n")
+        project = load_project(game_dir)
+        with pytest.raises(KeyError, match="init_state"):
+            project.run_label_python("init_stat", StoreNamespace())
+
+    def test_duplicate_label(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "label dup:\n    $ a = 1\n")
+        write_rpy(game_dir, "b.rpy", "label dup:\n    $ a = 2\n")
+        project = load_project(game_dir)
+        with pytest.raises(KeyError, match=r"a\.rpy:1.*b\.rpy:1"):
+            project.run_label_python("dup", StoreNamespace())
+
+    def test_label_python_not_run_by_default(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "label a:\n    python:\n        x = 1\n")
+        ns, _ = load_ns(game_dir)
+        assert "x" not in ns
+
+
+class TestBoilerplateBuiltins:
+    def test_stock_gui_snippet_loads_cleanly(self, game_dir):
+        write_rpy(
+            game_dir,
+            "gui.rpy",
+            "﻿init offset = -2\n"
+            "init python:\n"
+            "    gui.init(1920, 1080)\n"
+            "define gui.text_size = 33\n"
+            "define gui.button_borders = Borders(6, 6, 6, 6)\n"
+            "default gui.accent = '#f00'\n"
+            "default preferences.text_cps = 40\n",
+        )
+        write_rpy(
+            game_dir,
+            "options.rpy",
+            'define config.name = _("Forest\'s Bane")\n'
+            "define gui.about = _p(\"\"\"\n"
+            "    A game.\n"
+            "\"\"\")\n"
+            "init python:\n"
+            "    build.classify('**~', None)\n"
+            "    config.character_id_prefixes.append('namebox')\n"
+            "    config.overlay_screens.append('quick_menu')\n"
+            "    style.default.font = 'x.ttf'\n",
+        )
+        ns, errors = load_ns(game_dir, on_error="skip")
+        assert errors == []
+        assert ns["config"].name == "Forest's Bane"
+        assert ns["gui"].text_size == 33
+        assert ns["gui"].button_borders.args == (6, 6, 6, 6)
+        assert ns["gui"].accent == "#f00"
+        assert ns["gui"].about == "A game."
+        assert ns["preferences"].text_cps == 40
+        assert ns["config"].overlay_screens == ["quick_menu"]
+        assert ns["build"].classify._calls
+
+        ns2, _ = load_ns(game_dir)
+        assert ns2["config"].overlay_screens == ["quick_menu"]
+        assert ns2["gui"] is not ns["gui"]
+
+    def test_undefined_name_still_raises(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "init python:\n    totally_undefined()\n")
+        with pytest.raises(RuntimeError, match=r"a\.rpy:1.*totally_undefined"):
+            load_ns(game_dir)
+
+
+class TestReviewGaps:
+    def test_define_augmented_on_unset_name_is_located_error(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "define missing += [1]\n")
+        with pytest.raises(RuntimeError, match=r"a\.rpy:1"):
+            load_ns(game_dir)
+        _, errors = load_ns(game_dir, on_error="skip")
+        assert errors[0][0].name == "missing"
+
+    def test_define_syntax_error_is_located(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "\ndefine x = 1 +\n")
+        with pytest.raises(RuntimeError, match=r"define x from .*a\.rpy:2") as exc_info:
+            load_ns(game_dir)
+        assert isinstance(exc_info.value.__cause__, SyntaxError)
+
+    def test_invalid_on_error_rejected(self, game_dir):
+        project = load_project(game_dir)
+        with pytest.raises(ValueError, match="on_error"):
+            project.execute_into(StoreNamespace(), on_error="ignore")
+
+    @pytest.mark.parametrize(
+        "statement, exc_type",
+        [('renpy.call("x")', CallException), ("renpy.return_statement()", ReturnException)],
+    )
+    def test_call_and_return_propagate_from_label(self, game_dir, statement, exc_type):
+        write_rpy(game_dir, "a.rpy", f"label a:\n    $ {statement}\n")
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        with pytest.raises(exc_type):
+            project.run_label_python("a", ns)

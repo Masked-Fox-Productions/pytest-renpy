@@ -50,7 +50,7 @@ default BOOKS = {
 }
 ```
 
-This is valid Ren'Py but not extractable by a single-line parser. Not a bug in the game — it's a parser limitation in Layer 1. Works fine in the actual engine and will work in Layer 2.
+This is valid Ren'Py. It used to be a Layer 1 parser limitation; since the logical-line parser (`docs/plans/2026-10-04-001-feat-layer1-real-project-loading-plan.md`), multi-line `define`/`default` load in Layer 1.
 
 ## minimum-viable-rpg
 
@@ -58,7 +58,7 @@ This is valid Ren'Py but not extractable by a single-line parser. Not a bug in t
 
 **Not a bug**, but a structural choice that limits Layer 1 testability. All 18 utility functions (combat, inventory, healing) are defined inside `label init_utils: / python:`. All 19 defaults are inside `label start:`. Only `get_base_location()` and the location constants are available via `init python:`.
 
-This is the most common Ren'Py pattern for complex games and is the primary motivation for Layer 2.
+The label `default`s are init-time in Ren'Py and now load in Layer 1. The `label init_utils:` / `python:` functions stay absent by default: the real engine runs them at init via `init: call init_utils`, but Layer 1 does not follow `call` (a deliberate boundary). Tests can opt in with `renpy_game.run_label_python("init_utils")`.
 
 ## forests-bane
 
@@ -84,6 +84,12 @@ This requires understanding the game's attribute resolution system (CHARACTER_DE
 
 `Entities["monsters"]["bekri"]` does not have a `poisoned` key by default. The `bekri_eat_arm()` function may set it conditionally, but accessing it unconditionally raises a KeyError. Test `test_eat_arm_consumes_poison_item` needs to use `.get("poisoned", False)` instead.
 
+### `damage.rpy` f-string needs Python 3.12
+
+**File:** `game/damage.rpy:115`
+
+An f-string nests same-type quotes (`f"{d["k"]}"`), which is only valid syntax from Python 3.12. Ren'Py 8.3.7 bundles Python 3.9, so this block would not compile in that engine either — either a game bug or a sign the game targets Ren'Py 8.4+. Under Python < 3.12 the whole `damage.rpy` init block fails to load in Layer 1 (allowlisted in `examples/forests-bane/test_layer1_loading.py`).
+
 ### `delete_cmd` category parameter also unused here
 
 **File:** `game/keyboard.rpy` (same pattern as terminalgame)
@@ -94,4 +100,4 @@ Forest's Bane shares the keyboard command system with terminalgame. The `delete_
 
 ### gui.rpy / screens.rpy / options.rpy reference Ren'Py internals
 
-All three projects include Ren'Py-generated boilerplate files that reference engine internals (`gui` namespace, `Borders` class, `build` namespace, `_()` translation function, `config` namespace). These fail during Layer 1 loading but are harmless — they're UI configuration, not game logic. The `on_error="skip"` option in the loader handles this gracefully.
+All three projects include Ren'Py-generated boilerplate files that reference engine internals (`gui` namespace, `Borders` class, `build` namespace, `_()` translation function, `config` namespace). These used to fail during Layer 1 loading. The mock now provides permissive stand-ins for them, so stock boilerplate loads; remaining failures can be tolerated with `renpy_on_error = skip` and asserted on via `renpy_game.load_errors`.

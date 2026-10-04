@@ -34,6 +34,8 @@ This plugin solves the extraction and mocking problems so that game Python can b
 
 ## Scope Boundaries
 
+> **Superseded in part (2026-10-04):** label-nested `init python`/`define`/`default`, multi-line `define`/`default`, and init-time Ren'Py builtins moved back into Layer 1. See `docs/plans/2026-10-04-001-feat-layer1-real-project-loading-plan.md` (Scope reversal).
+
 - No screen definitions parsing (screens are Ren'Py DSL, not Python)
 - No `_ren.py` file handling (these are already importable Python — users test them directly)
 - No `$` statement or `python:` block extraction from within labels (label-level code is metadata only in Layer 1)

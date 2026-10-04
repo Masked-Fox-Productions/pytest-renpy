@@ -87,3 +87,52 @@ right = _PositionConstant("right")
 left = _PositionConstant("left")
 center = _PositionConstant("center")
 truecenter = _PositionConstant("truecenter")
+
+
+class RecordingStub:
+    """Base for display/action stand-ins that only record their arguments.
+
+    Instances are callable no-ops so they also work where Ren'Py expects a
+    transition or action to be invoked.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+    def __call__(self, *args, **kwargs):
+        return None
+
+    def __repr__(self):
+        parts = [repr(a) for a in self.args]
+        parts += [f"{k}={v!r}" for k, v in self.kwargs.items()]
+        return f"{type(self).__name__}({', '.join(parts)})"
+
+
+def _recording(name):
+    return type(name, (RecordingStub,), {"__module__": __name__})
+
+
+# Display, transition, and value stand-ins referenced by stock boilerplate
+# (gui.rpy, screens.rpy, options.rpy) and game code at init time.
+DISPLAY_STUBS = {
+    name: _recording(name)
+    for name in (
+        "Borders",
+        "Pause",
+        "MoveTransition",
+        "BarValue",
+        "Quit",
+    )
+}
+
+
+class ATLTransform(RecordingStub):
+    """Placeholder bound to the name of an ATL ``transform name:`` statement."""
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.name = name
+
+    def __repr__(self):
+        return f"<ATL transform {self.name}>"

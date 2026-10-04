@@ -498,3 +498,73 @@ class TestCreateMockFreshness:
 
         assert m1.jumps == ["a"]
         assert m2.jumps == []
+
+
+# ---------------------------------------------------------------------------
+# Init-time builtins: config lists, permissive bags, text helpers, stubs
+# ---------------------------------------------------------------------------
+
+
+class TestConfigLists:
+    def test_mutable_config_lists_start_empty(self):
+        config = MockConfig()
+        config.overlay_screens.append("quick_menu")
+        config.character_id_prefixes.append("namebox")
+        assert config.overlay_screens == ["quick_menu"]
+        assert MockConfig().overlay_screens == []
+
+    def test_unknown_option_still_none(self):
+        assert MockConfig().some_unset_option is None
+
+    def test_mock_config_is_fresh_per_mock(self):
+        assert create_mock().config is not create_mock().config
+
+
+class TestPermissiveBag:
+    def test_writes_stick(self):
+        from pytest_renpy.mock_renpy.bag import PermissiveBag
+
+        gui = PermissiveBag("gui")
+        gui.text_size = 33
+        assert gui.text_size == 33
+        assert gui._values == {"text_size": 33}
+
+    def test_unknown_read_is_recording_stub_not_written(self):
+        from pytest_renpy.mock_renpy.bag import PermissiveBag
+
+        build = PermissiveBag("build")
+        build.classify("**~", None)
+        assert build.classify._calls == [{"args": ("**~", None), "kwargs": {}}]
+        assert "classify" not in build._values
+        assert repr(build.classify) == "<NoOpStub: build.classify>"
+
+
+class TestTextHelpers:
+    def test_underscore_passthrough(self):
+        from pytest_renpy.mock_renpy.text import double_underscore, underscore
+
+        assert underscore("Forest's Bane") == "Forest's Bane"
+        assert double_underscore("x") == "x"
+
+    def test_paragraph_joins_lines(self):
+        from pytest_renpy.mock_renpy.text import paragraph
+
+        text = """
+            First line
+            continues here.
+
+            Second paragraph.
+            """
+        assert paragraph(text) == "First line continues here.\n\nSecond paragraph."
+
+
+class TestDisplayStubs:
+    def test_recording_stubs_keep_args(self):
+        from pytest_renpy.mock_renpy.display import DISPLAY_STUBS
+
+        Borders = DISPLAY_STUBS["Borders"]
+        b = Borders(6, 6, 6, 6)
+        assert b.args == (6, 6, 6, 6)
+        assert repr(b) == "Borders(6, 6, 6, 6)"
+        move = DISPLAY_STUBS["MoveTransition"](0.5, enter="x")
+        assert move.kwargs == {"enter": "x"}
