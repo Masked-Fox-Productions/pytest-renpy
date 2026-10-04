@@ -11,6 +11,7 @@ from pytest_renpy.loader import ProjectData, load_project
 from pytest_renpy.mock_renpy import create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
 from pytest_renpy.engine.runner import RenpyEngine
+from pytest_renpy.sdk import discover_project, discover_sdk
 
 
 @dataclass
@@ -33,9 +34,9 @@ def _resolve_game_dir(project_path: Path) -> Path:
 @pytest.fixture(scope="session")
 def renpy_project(request) -> ProjectData:
     """Session-scoped fixture: parse the Ren'Py project once."""
-    project_path = Path(request.config.getoption("renpy_project")).resolve()
+    project_path = discover_project(request.config)
     if not project_path.is_dir():
-        pytest.fail(f"--renpy-project path does not exist: {project_path}")
+        pytest.fail(f"Project path does not exist: {project_path}")
 
     game_dir = _resolve_game_dir(project_path)
     return load_project(game_dir)
@@ -72,18 +73,16 @@ def renpy_game(renpy_project, renpy_store, renpy_mock) -> RenpyGame:
 def renpy_engine(request) -> RenpyEngine:
     """Function-scoped fixture: fresh headless Ren'Py engine per test.
 
-    Requires --renpy-sdk and --renpy-project to be set.
-    Skips if --renpy-sdk is not provided.
+    Uses the 5-step SDK autodiscovery cascade. Skips if no SDK is found.
     """
-    sdk_path = request.config.getoption("renpy_sdk")
-    if sdk_path is None:
-        pytest.skip("--renpy-sdk required for integration tests")
+    sdk = discover_sdk(request.config)
+    if sdk is None:
+        pytest.skip(
+            "No Ren'Py SDK found. Configure via: --renpy-sdk flag, RENPY_SDK env var, "
+            "renpy_sdk ini option, or install to ~/.renpy-sdk/"
+        )
 
-    sdk = Path(sdk_path).resolve()
-    if not sdk.is_dir():
-        pytest.exit(f"Ren'Py SDK not found at {sdk}")
-
-    project_path = Path(request.config.getoption("renpy_project")).resolve()
+    project_path = discover_project(request.config)
     engine = RenpyEngine(sdk, project_path, timeout=15)
     engine.start()
     yield engine

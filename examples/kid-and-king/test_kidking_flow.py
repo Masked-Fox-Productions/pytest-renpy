@@ -4,7 +4,8 @@ Tests the book-recommendation puzzle mini-game: 16 readers, 4 books,
 break room learning system, conference room selection flow, correct/wrong
 recommendation paths, and full game loop.
 
-Requires: Ren'Py SDK and the game at /projects/masked_fox/the-kid-and-the-king-of-chicago
+Requires: Ren'Py SDK (via autodiscovery) and the game project
+(set RENPY_PROJECT or --renpy-project to the game root).
 """
 from __future__ import annotations
 
@@ -14,11 +15,16 @@ from pathlib import Path
 import pytest
 
 from pytest_renpy.engine.runner import RenpyEngine
+from pytest_renpy.sdk import discover_sdk, validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
-PROJECT_PATH = Path("/projects/masked_fox/the-kid-and-the-king-of-chicago")
+SDK_PATH = Path(os.environ.get("RENPY_SDK", os.path.expanduser("~/tools/renpy-8.3.7-sdk")))
+PROJECT_PATH = Path(
+    os.environ.get("RENPY_PROJECT", "/projects/masked_fox/the-kid-and-the-king-of-chicago")
+)
 
-requires_sdk = pytest.mark.skipif(not SDK_PATH.exists(), reason="SDK not found")
+requires_sdk = pytest.mark.skipif(
+    not validate_sdk_path(SDK_PATH), reason="SDK not found"
+)
 requires_project = pytest.mark.skipif(
     not PROJECT_PATH.exists(), reason="kid-and-king not found"
 )

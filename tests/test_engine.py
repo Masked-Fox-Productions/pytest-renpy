@@ -13,12 +13,28 @@ from pytest_renpy.engine.runner import (
     NavigationResult,
     RenpyEngine,
 )
+from pytest_renpy.sdk import _scan_wellknown_path, validate_sdk_path
 
-SDK_PATH = Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
+
+def _find_test_sdk() -> Path:
+    """Locate an SDK the same way the plugin does: RENPY_SDK, then ~/.renpy-sdk/.
+
+    Falls back to the legacy ~/tools location so existing local setups keep working.
+    """
+    env_value = os.environ.get("RENPY_SDK")
+    if env_value and validate_sdk_path(Path(env_value)):
+        return Path(env_value)
+    wellknown = _scan_wellknown_path()
+    if wellknown is not None and validate_sdk_path(wellknown):
+        return wellknown
+    return Path(os.path.expanduser("~/tools/renpy-8.3.7-sdk"))
+
+
+SDK_PATH = _find_test_sdk()
 FIXTURE_GAME = Path(__file__).parent.parent / "spike" / "fixture_game"
 
 requires_sdk = pytest.mark.skipif(
-    not SDK_PATH.exists(), reason="Ren'Py SDK not found"
+    not validate_sdk_path(SDK_PATH), reason="Ren'Py SDK not found"
 )
 requires_fixture = pytest.mark.skipif(
     not FIXTURE_GAME.exists(), reason="Fixture game not found"
