@@ -71,13 +71,13 @@ class RenpyEngine:
         return self._process is not None and self._process.poll() is None
 
     def start(self) -> None:
+        if not self.project_path.is_dir():
+            raise EngineError(f"Project directory not found: {self.project_path}")
+
         sdk_python = self._find_sdk_python()
         if not validate_sdk_path(self.sdk_path):
             raise EngineError(f"renpy.py not found in SDK at {self.sdk_path}")
         renpy_main = self.sdk_path / "renpy.py"
-
-        if not self.project_path.is_dir():
-            raise EngineError(f"Project directory not found: {self.project_path}")
 
         game_dir = self.project_path / "game"
         if not game_dir.is_dir():

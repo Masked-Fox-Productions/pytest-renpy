@@ -32,7 +32,10 @@ jobs:
           key: renpy-sdk-${{ env.RENPY_SDK_VERSION }}
 
       - name: Fetch Ren'Py SDK
-        run: pytest-renpy fetch-sdk ${{ env.RENPY_SDK_VERSION }}
+        run: |
+          output=$(pytest-renpy fetch-sdk ${{ env.RENPY_SDK_VERSION }})
+          echo "$output"
+          echo "RENPY_SDK=$(echo "$output" | tail -n 1)" >> "$GITHUB_ENV"
 
       - name: Run Layer 2 tests
         run: pytest tests/test_engine.py examples/ci-test-game/ --renpy-project=examples/ci-test-game
