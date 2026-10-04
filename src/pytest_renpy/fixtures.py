@@ -26,6 +26,8 @@ class RenpyGame:
 
     def run_label_python(self, name: str) -> LabelRunResult:
         """Run label ``name``'s Python statements against this game's store."""
+        if self.project is None:
+            raise RuntimeError("RenpyGame has no project; build it via the renpy_game fixture")
         return self.project.run_label_python(name, self.store)
 
 

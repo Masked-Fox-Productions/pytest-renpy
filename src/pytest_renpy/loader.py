@@ -52,6 +52,13 @@ from pytest_renpy.rpy_parser import (
 _CONTROL_FLOW = (JumpException, CallException, ReturnException, QuitException)
 
 
+# Namespaces Ren'Py rejects per statement (renpy/common/000namespaces.rpy).
+_FORBIDDEN_NAMESPACES = {
+    "define": {"renpy", "preferences"},
+    "default": {"renpy", "config"},
+}
+
+
 class LoadError(Exception):
     """A define/default that Ren'Py itself would reject."""
 
@@ -326,9 +333,7 @@ class ProjectData:
         special = _special_namespace(store_path)
         keyword = "define" if isinstance(item, Define) else "default"
 
-        if special == "renpy" or (
-            special == ("preferences" if keyword == "define" else "config")
-        ):
+        if special in _FORBIDDEN_NAMESPACES[keyword]:
             raise LoadError(
                 f"{keyword} {item.name}: Ren'Py does not allow {keyword} "
                 f"in the {store_path} namespace"

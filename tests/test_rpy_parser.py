@@ -1215,3 +1215,23 @@ def test_transform_statement_recorded(tmp_path):
         ("slide_down", 0, 1),
         ("pulse", 1, 4),
     ]
+
+
+def test_label_header_variants(tmp_path):
+    result = _parse(
+        tmp_path,
+        "label start(a=(1, 2), b=f(3)):\n"
+        "    pass\n"
+        "label hidden hide:\n"
+        "    pass\n"
+        "label .sub:\n"
+        "    pass\n"
+        "label start.other:\n"
+        "    pass\n",
+    )
+    assert [l.name for l in result.labels] == [
+        "start",
+        "hidden",
+        "hidden.sub",
+        "start.other",
+    ]

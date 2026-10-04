@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pytest_renpy import JumpException, QuitException
+from pytest_renpy import CallException, JumpException, QuitException, ReturnException
 from pytest_renpy.loader import ProjectData, load_project
 from pytest_renpy.mock_renpy import MockPersistent, create_mock
 from pytest_renpy.mock_renpy.store import StoreNamespace
@@ -808,3 +808,35 @@ class TestBoilerplateBuiltins:
         write_rpy(game_dir, "a.rpy", "init python:\n    totally_undefined()\n")
         with pytest.raises(RuntimeError, match=r"a\.rpy:1.*totally_undefined"):
             load_ns(game_dir)
+
+
+class TestReviewGaps:
+    def test_define_augmented_on_unset_name_is_located_error(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "define missing += [1]\n")
+        with pytest.raises(RuntimeError, match=r"a\.rpy:1"):
+            load_ns(game_dir)
+        _, errors = load_ns(game_dir, on_error="skip")
+        assert errors[0][0].name == "missing"
+
+    def test_define_syntax_error_is_located(self, game_dir):
+        write_rpy(game_dir, "a.rpy", "\ndefine x = 1 +\n")
+        with pytest.raises(RuntimeError, match=r"define x from .*a\.rpy:2") as exc_info:
+            load_ns(game_dir)
+        assert isinstance(exc_info.value.__cause__, SyntaxError)
+
+    def test_invalid_on_error_rejected(self, game_dir):
+        project = load_project(game_dir)
+        with pytest.raises(ValueError, match="on_error"):
+            project.execute_into(StoreNamespace(), on_error="ignore")
+
+    @pytest.mark.parametrize(
+        "statement, exc_type",
+        [('renpy.call("x")', CallException), ("renpy.return_statement()", ReturnException)],
+    )
+    def test_call_and_return_propagate_from_label(self, game_dir, statement, exc_type):
+        write_rpy(game_dir, "a.rpy", f"label a:\n    $ {statement}\n")
+        project = load_project(game_dir)
+        ns = StoreNamespace()
+        project.execute_into(ns)
+        with pytest.raises(exc_type):
+            project.run_label_python("a", ns)

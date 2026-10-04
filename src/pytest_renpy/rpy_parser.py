@@ -152,7 +152,7 @@ _RE_DEFINE = re.compile(
     r"^define\s+(?:(-?\d+)\s+)?([\w.]+)\s*(\+=|\|=|=)\s*(.+)$", re.S
 )
 _RE_DEFAULT = re.compile(r"^default\s+(?:(-?\d+)\s+)?([\w.]+)\s*=\s*(.+)$", re.S)
-_RE_LABEL = re.compile(r"^label\s+(\w+)(?:\s*\([^)]*\))?\s*:$", re.S)
+_RE_LABEL = re.compile(r"^label\s+([\w.]+)\s*(?:\(.*\))?\s*(?:hide\s*)?:$", re.S)
 _RE_SCREEN = re.compile(r"^screen\s+\w+")
 _RE_TRANSFORM = re.compile(r"^transform\s+(?:(-?\d+)\s+)?(\w+)\s*(?:\(.*\))?\s*:$", re.S)
 _RE_WORD = re.compile(r"[A-Za-z_]\w*")
@@ -346,6 +346,7 @@ class _Walker:
         self.result = result
         self.physical = physical
         self.source_file = result.source_file
+        self.global_label: str | None = None
 
     def block_code(self, node: _Node) -> tuple[str, int]:
         """Dedented code for a Python block node's body.
@@ -449,8 +450,14 @@ class _Walker:
 
             m = _RE_LABEL.match(text)
             if m:
+                name = m.group(1)
+                if name.startswith("."):
+                    # Local label: qualified by the last global label, as in Ren'Py.
+                    name = f"{self.global_label}{name}"
+                elif "." not in name:
+                    self.global_label = name
                 new_label = Label(
-                    name=m.group(1), source_line=ll.start, source_file=self.source_file
+                    name=name, source_line=ll.start, source_file=self.source_file
                 )
                 self.result.labels.append(new_label)
                 self.walk(node.children, frame.child(), new_label, True)
