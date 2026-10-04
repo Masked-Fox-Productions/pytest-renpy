@@ -16,7 +16,7 @@ Point `--renpy-project` at your Ren'Py project directory (defaults to `.`):
 pytest --renpy-project=/path/to/my-game
 ```
 
-The plugin parses `.rpy` files, extracts `init python:` blocks, and executes them under a mock `renpy` namespace.
+The plugin parses `.rpy` files, extracts init-time Python (`init python:` blocks, `define`, `default`), and executes it under a mock `renpy` namespace in Ren'Py's init order.
 
 ### Write a test
 
@@ -42,12 +42,45 @@ def test_jump_target(renpy_game):
 
 | Fixture | Scope | Description |
 |---------|-------|-------------|
-| `renpy_game` | function | Combined object with `.store`, `.mock`, and `.labels` |
+| `renpy_game` | function | Combined object with `.store`, `.mock`, `.labels`, `.load_errors`, and `.run_label_python(name)` |
 | `renpy_store` | function | Fresh `StoreNamespace` with all init blocks executed |
 | `renpy_mock` | function | Fresh mock `renpy` module with call tracking |
+| `renpy_load_errors` | function | `(item, exception)` pairs skipped while loading (skip mode only) |
 | `renpy_project` | session | Parsed project data (cached, parsed once) |
 
 Each function-scoped fixture re-executes all init blocks into a fresh namespace, so tests are fully isolated.
+
+### Load errors
+
+By default a load error (an init block, `define`, or `default` that raises, or a `.rpy` statement that is never terminated) fails the test. Real projects often have a few blocks that can't run under the mock; load them anyway and assert on what failed:
+
+```ini
+[pytest]
+renpy_on_error = skip
+```
+
+(or `pytest --renpy-on-error=skip`)
+
+```python
+def test_only_known_load_errors(renpy_game):
+    for item, exc in renpy_game.load_errors:
+        assert item.source_file.endswith("screens.rpy"), f"{item.source_file}:{item.source_line}: {exc}"
+```
+
+Every error names `source_file:source_line`, and tracebacks from game code point at the `.rpy` line.
+
+### Building state from labels
+
+Labels are metadata by default; their bodies never run at load. To build real game state that a label sets up with `$` lines or `python:` blocks, opt in:
+
+```python
+def test_board_state(renpy_game):
+    result = renpy_game.run_label_python("init_board_dicts")
+    assert renpy_game.store["Entities"]
+    print(result.skipped)  # dialogue, show/scene, menus, if blocks... not run
+```
+
+Only the label's top-level Python statements run, in order. `renpy.jump()` and friends still raise `JumpException` etc. On a raw namespace, use `project.run_label_python(name, namespace)`.
 
 ### Mock renpy
 
@@ -81,14 +114,31 @@ from pytest_renpy import JumpException, CallException, ReturnException, QuitExce
 
 ## What gets parsed
 
-- `init python:` blocks (with priority and named stores)
-- `define` statements (evaluated in namespace)
-- `default` statements (set if not already defined)
-- `label` declarations (available as metadata)
+Files are split into Ren'Py *logical lines* first, so statements spanning lines (multi-line dict literals, triple-quoted strings, multi-line dialogue, backslash continuations) parse as one statement.
+
+- `init python:` blocks (with priority and named stores), including ones nested inside labels
+- `define` and `default` statements, including multi-line ones and ones inside labels
+- `python:` blocks and `$` lines directly inside `init:` blocks
+- `transform` names (bound to a placeholder; ATL is not emulated)
+- `label` declarations (available as metadata, plus their bodies for `run_label_python`)
+
+Screens are skipped entirely; plain `python:`/`$` in a label body stays runtime-only.
+
+### Init order and defaults
+
+Init blocks, defines, and defaults run as one stream ordered by (priority, file, line), as in Ren'Py: priority comes from `init N`, `define N`/`default N`, `init offset` (block-scoped), or an enclosing `init N:` block; files sort by their path relative to the game directory.
+
+- `define a.b = x` sets an attribute on the named store, creating it if needed (`config.*`, `gui.*`, `build.*` included); `define persistent.x` sets it only if it is `None`.
+- `default persistent.x`, `default gui.x`, and `default preferences.x` apply at their place in the stream. Other defaults are evaluated after all init code, in stream order, and overwrite init-time values — except names you pre-seed in the namespace passed to `execute_into` (or a `persistent=` you pass in).
+- `default config.x`, `define preferences.x`, and `define`/`default renpy.x` are load errors, as in Ren'Py.
+
+Known divergences: all named stores share one namespace; `init: call some_label` does not run that label (use `run_label_python`); `python early` is skipped; game code compiles with the host Python, not Ren'Py's bundled 3.9.
 
 ## What's mocked
 
-`renpy.jump`, `renpy.call`, `renpy.quit`, `renpy.pause`, `renpy.display_menu`, `renpy.scene`, `renpy.show`, `renpy.hide`, `renpy.with_statement`, `renpy.version`, `renpy.notify`, `renpy.random`, `renpy.config`, `persistent`, `Character`, `Transform`, `TintMatrix`, `Dissolve`, position constants (`right`, `left`, `center`, `truecenter`), transition constants (`dissolve`, `fade`).
+`renpy.jump`, `renpy.call`, `renpy.quit`, `renpy.pause`, `renpy.display_menu`, `renpy.scene`, `renpy.show`, `renpy.hide`, `renpy.with_statement`, `renpy.version`, `renpy.notify`, `renpy.random`, `renpy.config` (also `config`), `persistent`, `gui`, `build`, `preferences`, `style` (permissive bags: writes stick, unknown reads and calls are recorded no-ops), `_`/`__`/`_p`, `Character`, `Transform`, `TintMatrix`, `Dissolve`, position constants (`right`, `left`, `center`, `truecenter`), transition constants (`dissolve`, `fade`), and recording stand-ins for `Borders`, `Pause`, `MoveTransition`, `BarValue`, `Quit`.
+
+Unknown names still raise `NameError`, so genuine mistakes in game code surface.
 
 Unimplemented `renpy.*` attributes return no-op stubs instead of raising errors.
 
